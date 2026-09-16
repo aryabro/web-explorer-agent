@@ -1,0 +1,45 @@
+<!doctype html>
+<html>
+<head>
+  <title>Confirm account card</title>
+  <link rel="stylesheet" href="/static/legacy.css">
+  <script src="/static/app.js"></script>
+</head>
+<body>
+  <div class="mast">ACCOUNT CARD / FINAL CHECK</div>
+  <div class="panel" data-content></div>
+  <script>
+    if (NightWindow.requireSession()) {
+      const pending = JSON.parse(sessionStorage.getItem("night-window:pending-account") || "null");
+      const id = sessionStorage.getItem("night-window:selected-member");
+      const content = document.querySelector("[data-content]");
+      if (!pending || !id) {
+        content.innerHTML = `<div class="warning">No account card is awaiting confirmation.</div>`;
+      } else {
+        content.innerHTML = `
+          <div class="warning"><b>MUTATING ACTION</b><br>This will add an account card to member ${id}.</div>
+          <table class="form">
+            <tr><td>Product</td><td>${pending.product}</td></tr>
+            <tr><td>Nickname</td><td>${pending.nickname}</td></tr>
+            <tr><td>Opening deposit</td><td>$${pending.balance.toFixed(2)}</td></tr>
+          </table>
+          <p><button>Confirm and create account</button> &nbsp; <a href="/detail.html">Cancel</a></p>`;
+        NightWindow.saltFields();
+        content.querySelector("button").onclick = function () {
+          const data = NightWindow.ledger();
+          const account = {
+            ...pending,
+            id: `S-${Math.floor(1000 + Math.random() * 9000)}`
+          };
+          data.members[id].accounts.push(account);
+          NightWindow.saveLedger(data);
+          sessionStorage.removeItem("night-window:pending-account");
+          sessionStorage.setItem("night-window:last-created", account.id);
+          NightWindow.go("created-account");
+        };
+      }
+    }
+  </script>
+</body>
+</html>
+

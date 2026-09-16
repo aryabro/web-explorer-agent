@@ -1,0 +1,27 @@
+version: 1
+allowed_origins:
+  - http://127.0.0.1:8765
+  - http://localhost:8765
+  - https://www.monroetwplibrary.org
+  - https://monroetwplibrary.org
+  - https://mon.search.stellanj.org
+allowed_path_prefixes:
+  - /
+  - /tenant-b
+allowed_actions:
+  - navigate
+  - click
+  - type
+  - select
+  - extract
+  - wait
+  - dismiss
+max_steps: 20
+risk:
+  safe: allow
+  mutating: confirm
+  irreversible: deny
+deny_text_patterns:
+  - '(?i)\b(delete|liquidate|wire transfer)\b'
+  - '(?i)\bplace holds?\b'
+

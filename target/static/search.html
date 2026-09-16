@@ -1,0 +1,85 @@
+<!doctype html>
+<html>
+<head>
+  <title>Member pigeonhole lookup</title>
+  <link rel="stylesheet" href="/static/legacy.css">
+  <script src="/static/app.js"></script>
+</head>
+<body>
+  <div class="mast">MEMBER PIGEONHOLE / LOOKUP</div>
+  <div class="panel" id="search-panel">
+    <p>Enter the five-digit member number from the paper jacket.</p>
+    <table class="form">
+      <tr>
+        <td>Member number</td>
+        <td><input inputmode="numeric" maxlength="5" size="12" autocomplete="off"></td>
+      </tr>
+      <tr>
+        <td>Search scope</td>
+        <td><select><option>Active and dormant</option><option>Active only</option></select></td>
+      </tr>
+      <tr>
+        <td colspan="2" style="text-align:right"><button>Pull pigeonhole</button></td>
+      </tr>
+    </table>
+    <div class="warning hidden" data-message></div>
+  </div>
+  <div class="modal hidden" data-interstitial>
+    <h3>NOTICE FROM RECORDS</h3>
+    <p>The overnight index was recently re-shelved. Confirm that you want to continue.</p>
+    <button>Continue lookup</button>
+  </div>
+  <script>
+    if (NightWindow.requireSession()) {
+      const memberInput = document.querySelector("input");
+      const searchButton = document.querySelector("#search-panel button");
+      NightWindow.saltFields();
+
+      function runSearch() {
+        const id = memberInput.value.trim();
+        const fault = NightWindow.fault();
+        if (fault === "session_drop") {
+          NightWindow.clearFault();
+          NightWindow.signOut();
+          sessionStorage.setItem("night-window:expired", "1");
+          NightWindow.go("signin");
+          return;
+        }
+        if (fault === "interstitial") {
+          NightWindow.clearFault();
+          const modal = document.querySelector("[data-interstitial]");
+          modal.classList.remove("hidden");
+          modal.querySelector("button").onclick = function () {
+            modal.classList.add("hidden");
+            completeSearch(id);
+          };
+          return;
+        }
+        if (fault === "slow") {
+          NightWindow.clearFault();
+          searchButton.disabled = true;
+          searchButton.textContent = "Index turning...";
+          setTimeout(() => completeSearch(id), 6500);
+          return;
+        }
+        completeSearch(id);
+      }
+
+      function completeSearch(id) {
+        if (!/^[0-9]{5}$/.test(id)) {
+          const message = document.querySelector("[data-message]");
+          message.textContent = "VALIDATION: member number must contain five digits.";
+          message.classList.remove("hidden");
+          return;
+        }
+        sessionStorage.setItem("night-window:selected-member", id);
+        NightWindow.go("detail");
+      }
+
+      searchButton.onclick = runSearch;
+      memberInput.onkeydown = event => { if (event.key === "Enter") runSearch(); };
+    }
+  </script>
+</body>
+</html>
+

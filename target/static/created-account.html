@@ -1,0 +1,25 @@
+<!doctype html>
+<html>
+<head>
+  <title>Account card created</title>
+  <link rel="stylesheet" href="/static/legacy.css">
+  <script src="/static/app.js"></script>
+</head>
+<body>
+  <div class="mast">ACCOUNT CARD / FILED</div>
+  <div class="panel">
+    <div class="success">
+      <b>ACCOUNT CARD CREATED</b><br>
+      New account <span data-account></span> was filed in the member jacket.
+    </div>
+    <p><a href="/detail.html">Return to member jacket</a></p>
+  </div>
+  <script>
+    if (NightWindow.requireSession()) {
+      document.querySelector("[data-account]").textContent =
+        sessionStorage.getItem("night-window:last-created") || "(unknown)";
+    }
+  </script>
+</body>
+</html>
+

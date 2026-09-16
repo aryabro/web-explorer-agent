@@ -1,0 +1,57 @@
+capability_id: member.read_savings_balance
+version: 1.0.0
+title: Read a member's savings balance
+description: Signs into Night Window, opens a member jacket, and returns the visible current savings balance.
+goal: Sign on, look up the supplied member number, and read the current savings balance.
+target: http://127.0.0.1:8765/
+product: night-window
+product_version: "4.1"
+surface_kind: legacy_web
+tenant: training-bay-17
+max_steps: 14
+inputs:
+  operator_id:
+    type: string
+    description: Runtime teller/operator identifier.
+    sensitivity: none
+  pin:
+    type: string
+    description: Runtime-only sign-on PIN; the value is never persisted.
+    sensitivity: secret
+  member_id:
+    type: string
+    description: Five-digit fictional member number.
+    sensitivity: identifier
+outputs:
+  savings_balance:
+    type: string
+    description: Current savings balance as displayed by the application.
+    sensitivity: financial
+business_outcomes:
+  - code: MEMBER_NOT_FOUND
+    description: No member jacket exists for the supplied number.
+    visible_text: NO MATCHING MEMBER
+  - code: PERMISSION_DENIED
+    description: The signed-in operator cannot access the member jacket.
+    visible_text: PERMISSION DENIED
+fatal_states:
+  - code: SESSION_EXPIRED
+    description: Night Window ended the authenticated session.
+    visible_text: SESSION EXPIRED
+click_recoveries:
+  - kind: dismiss_interstitial
+    visible_text: NOTICE FROM RECORDS
+    action_text: Continue lookup
+  - kind: retry_once
+    visible_text: Index turning...
+preferred_frame: night-work
+discovery_hints:
+  - The "Operator code" field takes operator_id and "Brass key (PIN)" takes pin.
+  - The "Member number" field takes member_id.
+  - Navigation-frame links are for recovery only; never click "Sign On" from the
+    lookup screen.
+  - On WINDOW AUTHORITY, fill operator_id and pin, then click "Turn the key".
+  - On MEMBER PIGEONHOLE / LOOKUP, fill member_id, then click "Pull pigeonhole".
+  - On SAVINGS BALANCE READY, extract the visible dollar value into
+    savings_balance and declare done.
+

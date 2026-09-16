@@ -1,0 +1,375 @@
+{
+  "schema_version": "1.0.0",
+  "contract": {
+    "id": "member.read_savings_balance",
+    "version": "1.0.0",
+    "title": "Read a member's savings balance",
+    "description": "Signs into Night Window, opens a member jacket, and returns the visible current savings balance.",
+    "inputs": {
+      "operator_id": {
+        "type": "string",
+        "description": "Runtime teller/operator identifier.",
+        "sensitivity": "none",
+        "required": true
+      },
+      "pin": {
+        "type": "string",
+        "description": "Runtime-only sign-on PIN; the value is never persisted.",
+        "sensitivity": "secret",
+        "required": true
+      },
+      "member_id": {
+        "type": "string",
+        "description": "Five-digit fictional member number.",
+        "sensitivity": "identifier",
+        "required": true
+      }
+    },
+    "outputs": {
+      "savings_balance": {
+        "type": "string",
+        "description": "Current savings balance as displayed by the application.",
+        "sensitivity": "financial",
+        "required": true
+      }
+    },
+    "business_outcomes": [
+      {
+        "code": "MEMBER_NOT_FOUND",
+        "description": "No member jacket exists for the supplied number.",
+        "visible_text": "NO MATCHING MEMBER"
+      },
+      {
+        "code": "PERMISSION_DENIED",
+        "description": "The signed-in operator cannot access the member jacket.",
+        "visible_text": "PERMISSION DENIED"
+      }
+    ]
+  },
+  "compatibility": {
+    "surface": {
+      "kind": "legacy_web",
+      "product": "night-window",
+      "product_version": "4.1",
+      "entry_point": "http://127.0.0.1:8765/"
+    },
+    "tenant": "training-bay-17",
+    "tenant_overrides": {
+      "targets": {},
+      "checkpoints": {}
+    }
+  },
+  "execution": {
+    "steps": [
+      {
+        "id": "s1",
+        "intent": "Sign on to the system",
+        "action": {
+          "type": "type",
+          "value": {
+            "source": "input",
+            "name": "operator_id"
+          }
+        },
+        "target": {
+          "description": "Operator code",
+          "strategies": [
+            {
+              "kind": "semantic",
+              "frame": "night-work",
+              "role": "textbox",
+              "adjacent_text": "Operator code",
+              "element_type": "input"
+            },
+            {
+              "kind": "structural",
+              "frame": "night-work",
+              "table_index": 0,
+              "row_index": 0,
+              "cell_index": 1,
+              "element_type": "input",
+              "type_index": 0
+            },
+            {
+              "kind": "geometry",
+              "frame": "night-work",
+              "anchor_text": "Operator code",
+              "element_type": "input",
+              "expected_box": {
+                "x": 390.8333435058594,
+                "y": 115.66667175292969,
+                "width": 158.6666717529297,
+                "height": 27.33333396911621
+              }
+            }
+          ]
+        },
+        "recover": [],
+        "risk": "safe",
+        "timeout_ms": 5000
+      },
+      {
+        "id": "s2",
+        "intent": "Enter PIN and sign on",
+        "action": {
+          "type": "type",
+          "value": {
+            "source": "input",
+            "name": "pin"
+          }
+        },
+        "target": {
+          "description": "Brass key (PIN)",
+          "strategies": [
+            {
+              "kind": "semantic",
+              "frame": "night-work",
+              "role": "textbox",
+              "adjacent_text": "Brass key (PIN)",
+              "element_type": "input"
+            },
+            {
+              "kind": "structural",
+              "frame": "night-work",
+              "table_index": 0,
+              "row_index": 1,
+              "cell_index": 1,
+              "element_type": "input",
+              "type_index": 1
+            },
+            {
+              "kind": "geometry",
+              "frame": "night-work",
+              "anchor_text": "Brass key (PIN)",
+              "element_type": "input",
+              "expected_box": {
+                "x": 390.8333435058594,
+                "y": 158.33334350585938,
+                "width": 158.6666717529297,
+                "height": 27.33333396911621
+              }
+            }
+          ]
+        },
+        "recover": [],
+        "risk": "safe",
+        "timeout_ms": 5000
+      },
+      {
+        "id": "s3",
+        "intent": "Sign on to the system",
+        "action": {
+          "type": "click"
+        },
+        "target": {
+          "description": "Turn the key",
+          "strategies": [
+            {
+              "kind": "semantic",
+              "frame": "night-work",
+              "role": "button",
+              "name": "Turn the key",
+              "adjacent_text": "Turn the key",
+              "element_type": "button"
+            },
+            {
+              "kind": "structural",
+              "frame": "night-work",
+              "table_index": 0,
+              "row_index": 2,
+              "cell_index": 0,
+              "element_type": "button",
+              "type_index": 0
+            },
+            {
+              "kind": "geometry",
+              "frame": "night-work",
+              "anchor_text": "Turn the key",
+              "element_type": "button",
+              "expected_box": {
+                "x": 849.6458740234375,
+                "y": 201.0,
+                "width": 109.35417175292969,
+                "height": 28.666667938232422
+              }
+            }
+          ]
+        },
+        "checkpoint": {
+          "id": "cp3",
+          "kind": "visible_text",
+          "expected": "MEMBER PIGEONHOLE / LOOKUP",
+          "timeout_ms": 5000
+        },
+        "recover": [
+          {
+            "kind": "dismiss_interstitial",
+            "visible_text": "NOTICE FROM RECORDS",
+            "action_text": "Continue lookup"
+          },
+          {
+            "kind": "retry_once",
+            "visible_text": "Index turning..."
+          }
+        ],
+        "risk": "safe",
+        "timeout_ms": 5000
+      },
+      {
+        "id": "s4",
+        "intent": "Enter member number and pull pigeonhole",
+        "action": {
+          "type": "type",
+          "value": {
+            "source": "input",
+            "name": "member_id"
+          }
+        },
+        "target": {
+          "description": "Member number",
+          "strategies": [
+            {
+              "kind": "semantic",
+              "frame": "night-work",
+              "role": "textbox",
+              "adjacent_text": "Member number",
+              "element_type": "input"
+            },
+            {
+              "kind": "structural",
+              "frame": "night-work",
+              "table_index": 0,
+              "row_index": 0,
+              "cell_index": 1,
+              "element_type": "input",
+              "type_index": 0
+            },
+            {
+              "kind": "geometry",
+              "frame": "night-work",
+              "anchor_text": "Member number",
+              "element_type": "input",
+              "expected_box": {
+                "x": 390.8333435058594,
+                "y": 115.66667175292969,
+                "width": 110.66667175292969,
+                "height": 27.33333396911621
+              }
+            }
+          ]
+        },
+        "recover": [],
+        "risk": "safe",
+        "timeout_ms": 5000
+      },
+      {
+        "id": "s5",
+        "intent": "Pull the pigeonhole to retrieve member data",
+        "action": {
+          "type": "click"
+        },
+        "target": {
+          "description": "Pull pigeonhole",
+          "strategies": [
+            {
+              "kind": "semantic",
+              "frame": "night-work",
+              "role": "button",
+              "name": "Pull pigeonhole",
+              "adjacent_text": "Pull pigeonhole",
+              "element_type": "button"
+            },
+            {
+              "kind": "structural",
+              "frame": "night-work",
+              "table_index": 0,
+              "row_index": 2,
+              "cell_index": 0,
+              "element_type": "button",
+              "type_index": 0
+            },
+            {
+              "kind": "geometry",
+              "frame": "night-work",
+              "anchor_text": "Pull pigeonhole",
+              "element_type": "button",
+              "expected_box": {
+                "x": 825.6458740234375,
+                "y": 202.33334350585938,
+                "width": 133.3541717529297,
+                "height": 28.666667938232422
+              }
+            }
+          ]
+        },
+        "checkpoint": {
+          "id": "cp5",
+          "kind": "visible_text",
+          "expected": "SAVINGS BALANCE READY",
+          "timeout_ms": 5000
+        },
+        "recover": [
+          {
+            "kind": "dismiss_interstitial",
+            "visible_text": "NOTICE FROM RECORDS",
+            "action_text": "Continue lookup"
+          },
+          {
+            "kind": "retry_once",
+            "visible_text": "Index turning..."
+          }
+        ],
+        "risk": "safe",
+        "timeout_ms": 5000
+      },
+      {
+        "id": "s6",
+        "intent": "Extract the savings balance from the screen",
+        "action": {
+          "type": "extract",
+          "output": "savings_balance"
+        },
+        "target": {
+          "description": "sensitive output element (value redacted)",
+          "strategies": [
+            {
+              "kind": "structural",
+              "frame": "night-work",
+              "element_type": "strong",
+              "type_index": 0
+            }
+          ]
+        },
+        "recover": [],
+        "risk": "safe",
+        "timeout_ms": 5000
+      }
+    ],
+    "success": {
+      "checkpoint_ids": [
+        "cp5"
+      ],
+      "required_outputs": [
+        "savings_balance"
+      ]
+    },
+    "fatal_states": [
+      {
+        "code": "SESSION_EXPIRED",
+        "description": "Night Window ended the authenticated session.",
+        "visible_text": "SESSION EXPIRED"
+      }
+    ]
+  },
+  "governance": {
+    "approval": {
+      "status": "draft"
+    },
+    "provenance": {
+      "discovered_by": "gemini-3.1-flash-lite",
+      "discovered_at": "2026-09-16T19:58:12.091294Z",
+      "trace_ref": "evidence/discovery-20260916T195717Z-60d257/trace.jsonl",
+      "compiler_version": "pigeonhole-0.1.0"
+    }
+  }
+}

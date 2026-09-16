@@ -1,0 +1,71 @@
+capability_id: member.open_sub_account
+version: 1.0.0
+title: Open a member sub-account
+description: Signs in, opens a member jacket, reviews a new savings card, and creates it after confirmation.
+goal: Open a new sub-account for the supplied member and reach the visible creation confirmation.
+target: http://127.0.0.1:8765/
+product: night-window
+product_version: "4.1"
+surface_kind: legacy_web
+tenant: training-bay-17
+max_steps: 20
+inputs:
+  operator_id:
+    type: string
+    description: Runtime teller/operator identifier.
+    sensitivity: none
+  pin:
+    type: string
+    description: Runtime-only sign-on PIN.
+    sensitivity: secret
+  member_id:
+    type: string
+    description: Five-digit fictional member number.
+    sensitivity: identifier
+  product:
+    type: string
+    description: Savings product label displayed in the product list.
+    sensitivity: none
+  nickname:
+    type: string
+    description: Nickname for the new account.
+    sensitivity: pii
+  opening_deposit:
+    type: string
+    description: Decimal opening deposit.
+    sensitivity: financial
+outputs:
+  account_id:
+    type: string
+    description: Identifier displayed after account creation.
+    sensitivity: identifier
+business_outcomes:
+  - code: MEMBER_NOT_FOUND
+    description: No member jacket exists for the supplied number.
+    visible_text: NO MATCHING MEMBER
+  - code: PERMISSION_DENIED
+    description: The signed-in operator cannot access the member jacket.
+    visible_text: PERMISSION DENIED
+fatal_states:
+  - code: SESSION_EXPIRED
+    description: Night Window ended the authenticated session.
+    visible_text: SESSION EXPIRED
+click_recoveries:
+  - kind: dismiss_interstitial
+    visible_text: NOTICE FROM RECORDS
+    action_text: Continue lookup
+  - kind: retry_once
+    visible_text: Index turning...
+preferred_frame: night-work
+discovery_hints:
+  - The "Operator code" field takes operator_id and "Brass key (PIN)" takes pin.
+  - The "Member number" field takes member_id.
+  - Navigation-frame links are for recovery only; never click "Sign On" from the
+    lookup screen.
+  - On WINDOW AUTHORITY, fill operator_id and pin, then click "Turn the key".
+  - On MEMBER PIGEONHOLE / LOOKUP, fill member_id, then click "Pull pigeonhole".
+  - From the member jacket, open the new sub-account form, fill product,
+    nickname and opening_deposit, then review before confirming.
+  - Creating the account is a mutating action; extract the displayed account
+    identifier into account_id once the confirmation screen is visible.
+

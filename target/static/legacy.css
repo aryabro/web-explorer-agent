@@ -1,0 +1,92 @@
+:root {
+  font-family: "Courier New", monospace;
+  color: #14220d;
+  background: #d9d3ad;
+}
+
+body {
+  margin: 0;
+  padding: 10px;
+  background: #d9d3ad;
+  font-size: 14px;
+}
+
+.mast {
+  color: #f1e9bf;
+  background: #263d18;
+  border: 3px ridge #879368;
+  padding: 5px 10px;
+  letter-spacing: 2px;
+}
+
+.panel {
+  margin-top: 10px;
+  border: 4px ridge #879368;
+  background: #ebe5bd;
+  padding: 8px;
+}
+
+table.form {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 4px;
+}
+
+table.form td {
+  border: 1px solid #918b67;
+  padding: 5px;
+  background: #e3ddb5;
+}
+
+table.form td:first-child {
+  width: 38%;
+  font-weight: bold;
+  color: #334b23;
+}
+
+input, select, button {
+  font-family: inherit;
+  border: 2px inset #b2ad87;
+  background: #ffffdf;
+  padding: 4px;
+}
+
+button, input[type="button"], input[type="submit"] {
+  border: 3px outset #9c9a73;
+  background: #b7b58d;
+  cursor: pointer;
+}
+
+.warning {
+  border: 3px double #8b260e;
+  background: #f5d3ac;
+  color: #661b0b;
+  padding: 8px;
+}
+
+.success {
+  border: 3px double #315d20;
+  background: #d2e3b3;
+  padding: 8px;
+}
+
+.dim {
+  color: #5e614e;
+  font-size: 12px;
+}
+
+.modal {
+  position: fixed;
+  inset: 18% 14%;
+  z-index: 20;
+  border: 8px ridge #744015;
+  background: #fff1c5;
+  box-shadow: 10px 10px 0 rgba(0,0,0,.35);
+  padding: 20px;
+}
+
+.hidden { display: none; }
+
+a { color: #243c75; }
+pre { white-space: pre-wrap; font-size: 11px; }
+

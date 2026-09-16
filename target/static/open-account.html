@@ -1,0 +1,43 @@
+<!doctype html>
+<html>
+<head>
+  <title>Prepare account card</title>
+  <link rel="stylesheet" href="/static/legacy.css">
+  <script src="/static/app.js"></script>
+</head>
+<body>
+  <div class="mast">ACCOUNT CARD / PREPARATION</div>
+  <div class="panel">
+    <p>This prepares a new card. Nothing is created until the final confirmation.</p>
+    <table class="form">
+      <tr><td>Product</td><td><select><option>Holiday Savings</option><option>Share Savings</option></select></td></tr>
+      <tr><td>Nickname</td><td><input maxlength="24" autocomplete="off"></td></tr>
+      <tr><td>Opening deposit</td><td><input inputmode="decimal" value="0.00" autocomplete="off"></td></tr>
+      <tr><td colspan="2" style="text-align:right"><button>Review card</button></td></tr>
+    </table>
+    <div class="warning hidden" data-message></div>
+  </div>
+  <script>
+    if (NightWindow.requireSession()) {
+      const controls = document.querySelectorAll("select, input");
+      NightWindow.saltFields();
+      document.querySelector("button").onclick = function () {
+        const deposit = Number(controls[2].value);
+        if (!controls[1].value.trim() || !Number.isFinite(deposit) || deposit < 0) {
+          const message = document.querySelector("[data-message]");
+          message.textContent = "VALIDATION: supply a nickname and a non-negative opening deposit.";
+          message.classList.remove("hidden");
+          return;
+        }
+        sessionStorage.setItem("night-window:pending-account", JSON.stringify({
+          product: controls[0].value,
+          nickname: controls[1].value.trim(),
+          balance: deposit
+        }));
+        NightWindow.go("confirm-account");
+      };
+    }
+  </script>
+</body>
+</html>
+

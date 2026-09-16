@@ -1,0 +1,44 @@
+<!doctype html>
+<html>
+<head>
+  <title>Teller sign on</title>
+  <link rel="stylesheet" href="/static/legacy.css">
+  <script src="/static/app.js"></script>
+  <script src="/runtime-config.js"></script>
+</head>
+<body>
+  <div class="mast">WINDOW AUTHORITY / NORTH BAY</div>
+  <div class="panel">
+    <p>Identify the teller assigned to this night window.</p>
+    <table class="form">
+      <tr><td>Teller ID</td><td><input autocomplete="off" size="18"></td></tr>
+      <tr><td>Access PIN</td><td><input type="password" autocomplete="off" size="18"></td></tr>
+      <tr><td colspan="2" style="text-align:right"><button>Unlock console</button></td></tr>
+    </table>
+    <p class="dim">Training fixture: operator <b>teller7</b>. PIN comes from runtime configuration.</p>
+    <div class="warning hidden" data-message></div>
+  </div>
+  <script>
+    const inputs = document.querySelectorAll("input");
+    const button = document.querySelector("button");
+    NightWindow.saltFields();
+    if (sessionStorage.getItem("night-window:expired")) {
+      sessionStorage.removeItem("night-window:expired");
+      const message = document.querySelector("[data-message]");
+      message.textContent = "SESSION EXPIRED: sign on again before continuing.";
+      message.classList.remove("hidden");
+    }
+    button.onclick = function () {
+      const expected = window.__NIGHT_WINDOW_PIN__;
+      if (inputs[0].value.trim() && inputs[1].value === expected) {
+        NightWindow.signIn(inputs[0].value.trim());
+        NightWindow.go("search");
+      } else {
+        const message = document.querySelector("[data-message]");
+        message.textContent = "SIGN-ON REFUSED: teller ID or access PIN was not accepted.";
+        message.classList.remove("hidden");
+      }
+    };
+  </script>
+</body>
+</html>

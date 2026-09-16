@@ -1,0 +1,25 @@
+<!doctype html>
+<html>
+<head>
+  <link rel="stylesheet" href="/static/legacy.css">
+  <script src="/static/app.js"></script>
+</head>
+<body>
+  <div class="mast">NIGHT<br>WINDOW<br><span class="dim">v4.1 NB</span></div>
+  <div class="panel">
+    <p><b>JACKETS</b></p>
+    <p><a href="/tenant-b/search.html" target="night-work">Member Search</a></p>
+    <p><a href="/tenant-b/signin.html" target="night-work">Sign On</a></p>
+    <hr>
+    <p><a href="#" id="exit-link">End Window</a></p>
+  </div>
+  <p class="dim">North Bay<br>Local terminal</p>
+  <script>
+    document.getElementById("exit-link").onclick = function (event) {
+      event.preventDefault();
+      NightWindow.signOut();
+      parent.frames["night-work"].location.href = "/tenant-b/signin.html";
+    };
+  </script>
+</body>
+</html>

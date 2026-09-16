@@ -1,0 +1,309 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+from collections.abc import Iterable
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Annotated
+
+import typer
+import uvicorn
+
+from pigeonhole.catalog import find_capability, iter_capabilities, summarize, tool_definitions
+from pigeonhole.compiler import Job, compile_recording, save_capability
+from pigeonhole.config import LLMConfig, runtime_pin
+from pigeonhole.contracts import Approval, Risk
+from pigeonhole.discovery import DiscoveryLoop, OpenAICompatibleModel
+from pigeonhole.evidence import EvidenceWriter
+from pigeonhole.handoff import HandoffCoordinator
+from pigeonhole.policy import PolicyEngine
+from pigeonhole.redact import Redactor
+from pigeonhole.replay import ReplayEngine, load_capability
+from pigeonhole.surface.playwright import PlaywrightSurface
+from pigeonhole.tenants import apply_tenant, find_profile
+
+app = typer.Typer(no_args_is_help=True, help="Pigeonhole computer-use automation")
+
+
+def _parse_inputs(values: list[str]) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for value in values:
+        if "=" not in value:
+            raise typer.BadParameter(f"input must be NAME=VALUE, got {value!r}")
+        name, raw = value.split("=", 1)
+        result[name] = raw
+    return result
+
+
+def _runtime_inputs(values: list[str], declared: Iterable[str]) -> dict[str, str]:
+    supplied = _parse_inputs(values)
+    names = set(declared)
+    if "operator_id" in names:
+        supplied.setdefault("operator_id", "teller7")
+    if "pin" in names:
+        supplied.setdefault("pin", runtime_pin())
+    return supplied
+
+
+def _known_sensitive(definitions: dict, values: dict[str, str]) -> list[str]:
+    return [
+        values[name]
+        for name, definition in definitions.items()
+        if name in values and definition.sensitivity != "none"
+    ]
+
+
+@app.command()
+def discover(
+    job_path: Annotated[Path, typer.Option("--job")] = Path("jobs/read_savings.yaml"),
+    input_value: Annotated[list[str], typer.Option("--input")] = [],
+    headless: Annotated[bool, typer.Option("--headless/--headed")] = False,
+    allow_mutating: Annotated[bool, typer.Option("--allow-mutating")] = False,
+) -> None:
+    """Run genuine LLM discovery, save recording/evidence, then compile."""
+    asyncio.run(_discover(job_path, input_value, headless, allow_mutating))
+
+
+async def _discover(
+    job_path: Path, values: list[str], headless: bool, allow_mutating: bool
+) -> None:
+    job = Job.load(job_path)
+    inputs = _runtime_inputs(values, job.inputs)
+    redactor = Redactor(_known_sensitive(job.inputs, inputs))
+    model = OpenAICompatibleModel(LLMConfig.from_env())
+    evidence = EvidenceWriter(
+        kind="discovery",
+        goal=job.goal,
+        target=job.target,
+        model=model.name,
+        redactor=redactor,
+    )
+    surface = await PlaywrightSurface.launch(headless=headless)
+    try:
+        loop = DiscoveryLoop(
+            surface,
+            model,
+            PolicyEngine.load(),
+            max_steps=job.max_steps,
+            event_sink=evidence.event,
+            confirmed_risks={Risk.MUTATING} if allow_mutating else set(),
+        )
+        result = await loop.run(
+            goal=job.goal,
+            target=job.target,
+            inputs=inputs,
+            input_names=list(job.inputs),
+            required_outputs=list(job.outputs),
+            hints=job.discovery_hints,
+            preferred_frame=job.preferred_frame,
+            click_recoveries=job.click_recoveries,
+        )
+        evidence.write_jsonl("recording.jsonl", result.recording.steps)
+        evidence.write_json("discovery-result.json", result)
+        if result.recording.success:
+            capability = compile_recording(
+                result.recording,
+                job,
+                trace_ref=(evidence.directory / "trace.jsonl").as_posix(),
+            )
+            output = Path("capabilities") / f"{job.capability_id}.json"
+            save_capability(capability, output)
+            typer.echo(f"compiled {output}")
+        typer.echo(
+            json.dumps(
+                redactor.data(
+                    {
+                        "status": result.status,
+                        "stop_reason": result.recording.stop_reason,
+                        "llm_calls": result.llm_calls,
+                        "evidence": str(evidence.directory),
+                    }
+                ),
+                indent=2,
+            )
+        )
+    finally:
+        await surface.close()
+
+
+@app.command()
+def replay(
+    capability_path: Annotated[Path, typer.Option("--capability")],
+    input_value: Annotated[list[str], typer.Option("--input")] = [],
+    headless: Annotated[bool, typer.Option("--headless/--headed")] = True,
+    allow_mutating: Annotated[bool, typer.Option("--allow-mutating")] = False,
+    allow_draft: Annotated[bool, typer.Option("--allow-draft")] = False,
+    fault: Annotated[str | None, typer.Option("--fault")] = None,
+    handoff: Annotated[bool, typer.Option("--handoff/--no-handoff")] = True,
+    tenant: Annotated[str | None, typer.Option("--tenant")] = None,
+) -> None:
+    """Replay an artifact without invoking an LLM."""
+    capability = load_capability(capability_path)
+    if tenant:
+        capability = apply_tenant(capability, find_profile(tenant))
+    asyncio.run(
+        _replay(
+            capability,
+            input_value,
+            headless,
+            allow_mutating,
+            allow_draft,
+            fault,
+            handoff,
+        )
+    )
+
+
+@app.command("call")
+def call_capability(
+    capability_id: Annotated[str, typer.Option("--id")],
+    input_value: Annotated[list[str], typer.Option("--input")] = [],
+    headless: Annotated[bool, typer.Option("--headless/--headed")] = True,
+    allow_mutating: Annotated[bool, typer.Option("--allow-mutating")] = False,
+    allow_draft: Annotated[bool, typer.Option("--allow-draft")] = False,
+    fault: Annotated[str | None, typer.Option("--fault")] = None,
+    handoff: Annotated[bool, typer.Option("--handoff/--no-handoff")] = True,
+    tenant: Annotated[str | None, typer.Option("--tenant")] = None,
+) -> None:
+    """Invoke a saved capability by id from the local catalog."""
+    capability = load_capability(find_capability(capability_id))
+    if tenant:
+        capability = apply_tenant(capability, find_profile(tenant))
+    asyncio.run(
+        _replay(
+            capability,
+            input_value,
+            headless,
+            allow_mutating,
+            allow_draft,
+            fault,
+            handoff,
+        )
+    )
+
+
+async def _replay(
+    capability,
+    values: list[str],
+    headless: bool,
+    allow_mutating: bool,
+    allow_draft: bool,
+    fault: str | None,
+    handoff_enabled: bool,
+) -> None:
+    inputs = _runtime_inputs(values, capability.contract.inputs)
+    redactor = Redactor(_known_sensitive(capability.contract.inputs, inputs))
+    evidence = EvidenceWriter(
+        kind="replay",
+        goal=capability.contract.description,
+        target=capability.compatibility.surface.entry_point,
+        model=None,
+        redactor=redactor,
+    )
+    surface = await PlaywrightSurface.launch(headless=headless)
+    coordinator = HandoffCoordinator(surface) if handoff_enabled else None
+    server = None
+    server_task = None
+    try:
+        if fault:
+            await surface.act(
+                "navigate", value=capability.compatibility.surface.entry_point
+            )
+            await surface.page.evaluate(
+                "(fault) => sessionStorage.setItem('night-window:fault', fault)",
+                fault,
+            )
+        engine = ReplayEngine(
+            surface=surface,
+            policy=PolicyEngine.load(),
+            evidence=evidence,
+            handoff=coordinator,
+            allow_mutating=allow_mutating,
+            allow_draft=allow_draft,
+        )
+        result = await engine.run(capability, inputs, navigate=not fault)
+        if result.status == "escalated" and coordinator and not headless:
+            server = uvicorn.Server(
+                uvicorn.Config(
+                    coordinator.operator_app(),
+                    host="127.0.0.1",
+                    port=8766,
+                    log_level="warning",
+                )
+            )
+            server_task = asyncio.create_task(server.serve())
+            typer.echo(
+                f"intervention {result.intervention_id}: http://127.0.0.1:8766/"
+            )
+            await coordinator.wait_for_return(result.intervention_id)
+            start_index = await engine.resume_index(capability)
+            await evidence.event(
+                "resumed",
+                {"resume_index": start_index, "basis": "live checkpoints"},
+            )
+            result = await engine.run(
+                capability, inputs, start_index=start_index, navigate=False
+            )
+        typer.echo(json.dumps(result.model_dump(mode="json"), indent=2))
+        typer.echo(f"evidence: {evidence.directory}")
+    finally:
+        if server:
+            server.should_exit = True
+        if server_task:
+            await server_task
+        await surface.close()
+
+
+@app.command()
+def approve(
+    capability_path: Annotated[Path, typer.Option("--capability")],
+    by: Annotated[str, typer.Option("--by")],
+) -> None:
+    """Mark a compiled capability as approved for unattended replay."""
+    capability = load_capability(capability_path)
+    capability.governance.approval = Approval(
+        status="approved",
+        approved_by=by,
+        approved_at=datetime.now(UTC),
+    )
+    save_capability(capability, capability_path)
+    typer.echo(f"approved {capability.contract.id} by {by}")
+
+
+@app.command("list")
+def list_capabilities() -> None:
+    """Summarize saved capabilities as an agent-facing catalog."""
+    rows = [summarize(capability, path) for path, capability in iter_capabilities()]
+    typer.echo(json.dumps(rows, indent=2))
+
+
+@app.command("tools")
+def dump_tools() -> None:
+    """Emit OpenAI-style tool definitions for saved capabilities."""
+    typer.echo(json.dumps(tool_definitions(), indent=2))
+
+
+@app.command("show-storage")
+def show_storage(
+    headless: Annotated[bool, typer.Option("--headless/--headed")] = True,
+) -> None:
+    """Print the independent sessionStorage oracle for a fresh session."""
+    asyncio.run(_show_storage(headless))
+
+
+async def _show_storage(headless: bool) -> None:
+    surface = await PlaywrightSurface.launch(headless=headless)
+    try:
+        await surface.act(
+            "navigate",
+            value=os.getenv("NIGHT_WINDOW_URL", "http://127.0.0.1:8765"),
+        )
+        typer.echo(json.dumps(await surface.storage_snapshot(), indent=2))
+    finally:
+        await surface.close()
+
+
+if __name__ == "__main__":
+    app()

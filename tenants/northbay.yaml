@@ -1,0 +1,21 @@
+tenant: northbay
+entry_point: http://127.0.0.1:8765/tenant-b/
+overrides:
+  targets:
+    s1:
+      adjacent_text: Teller ID
+      description: Teller ID
+    s2:
+      adjacent_text: Access PIN
+      description: Access PIN
+    s3:
+      name: Unlock console
+      adjacent_text: Unlock console
+      description: Unlock console
+    s5:
+      name: Open jacket
+      adjacent_text: Open jacket
+      description: Open jacket
+  checkpoints:
+    cp3:
+      expected: MEMBER JACKET
