@@ -1,0 +1,23 @@
+{
+  "status": "success",
+  "outputs": {
+    "savings_balance": "[REDACTED]"
+  },
+  "completed_steps": [
+    "s6"
+  ],
+  "llm_calls": 0,
+  "locator_votes": [
+    {
+      "step_id": "s6",
+      "winners": [
+        "structural"
+      ],
+      "agreement": 1,
+      "weak": true,
+      "overridden": false,
+      "drifted": false
+    }
+  ],
+  "drift_score": 0.0
+}

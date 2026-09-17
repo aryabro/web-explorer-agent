@@ -13,10 +13,12 @@ from pigeonhole.config import LLMConfig
 from pigeonhole.contracts import (
     Action,
     Checkpoint,
+    FailureCode,
     InputValue,
     LiteralValue,
     Recovery,
     Risk,
+    StepDiagnostic,
     TargetBundle,
 )
 from pigeonhole.surface.base import SurfaceDriver
@@ -85,12 +87,10 @@ class OpenAICompatibleModel:
         payload = {
             "model": self.config.model,
             "temperature": 0,
-            "response_format": {"type": "json_object"},
+            "tools": DISCOVERY_TOOLS,
+            "tool_choice": "required",
             "messages": [
-                {
-                    "role": "system",
-                    "content": DISCOVERY_SYSTEM_PROMPT,
-                },
+                {"role": "system", "content": DISCOVERY_SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
             ],
         }
@@ -118,66 +118,117 @@ class OpenAICompatibleModel:
                     f"model request failed ({response.status_code}): "
                     f"{response.text[:500]}"
                 )
-        content = response.json()["choices"][0]["message"]["content"].strip()
-        if content.startswith("```"):
-            content = content.split("\n", 1)[1].rsplit("```", 1)[0]
-        data = json.loads(content)
-        for raw_key in list(data):
-            kind = raw_key.lower()
-            nested = data.get(raw_key)
-            if kind in {"act", "done", "stuck"} and isinstance(nested, dict):
-                data.pop(raw_key)
-                data = {**nested, **data, "kind": kind}
-                break
-        if "checkpoint" in data and "checkpoint_text" not in data:
-            checkpoint = data.pop("checkpoint")
-            data["checkpoint_text"] = (
-                checkpoint.get("expected") or checkpoint.get("text")
-                if isinstance(checkpoint, dict)
-                else checkpoint
-            )
-        if "output_name" in data and "output" not in data:
-            data["output"] = data.pop("output_name")
-        if "input" in data and "input_name" not in data:
-            data["input_name"] = data.pop("input")
-        # Models often smuggle result values onto done, e.g. {"kind":"done","holds_count":"2"}.
-        # Keep only Decision fields so validation never crashes the run.
-        allowed = set(Decision.model_fields)
-        for key in list(data):
-            if key not in allowed:
-                data.pop(key)
-        return Decision.model_validate(data)
+        message = response.json()["choices"][0]["message"]
+        calls = message.get("tool_calls") or []
+        if not calls:
+            raise RuntimeError("model did not return a tool call")
+        call = calls[0]["function"]
+        data = json.loads(call.get("arguments") or "{}")
+        if not isinstance(data, dict):
+            data = {}
+        data["kind"] = call.get("name") or "stuck"
+        return _decision_from_payload(data)
+
+
+def _decision_from_payload(data: dict[str, Any]) -> Decision:
+    payload = dict(data)
+    if "checkpoint" in payload and "checkpoint_text" not in payload:
+        checkpoint = payload.pop("checkpoint")
+        payload["checkpoint_text"] = (
+            checkpoint.get("expected") or checkpoint.get("text")
+            if isinstance(checkpoint, dict)
+            else checkpoint
+        )
+    if "output_name" in payload and "output" not in payload:
+        payload["output"] = payload.pop("output_name")
+    if "input" in payload and "input_name" not in payload:
+        payload["input_name"] = payload.pop("input")
+    allowed = set(Decision.model_fields)
+    for key in list(payload):
+        if key not in allowed:
+            payload.pop(key)
+    return Decision.model_validate(payload)
+
+
+DISCOVERY_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "act",
+            "description": "Act on one ephemeral observation ref. Never invent CSS or selectors.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "intent": {"type": "string"},
+                    "action": {
+                        "type": "string",
+                        "enum": ["click", "type", "select", "extract", "dismiss"],
+                    },
+                    "ref": {
+                        "type": "string",
+                        "description": "Ephemeral control ref from the observation, e.g. c3",
+                    },
+                    "input_name": {"type": ["string", "null"]},
+                    "literal": {
+                        "type": ["string", "number", "boolean", "null"]
+                    },
+                    "output": {"type": ["string", "null"]},
+                    "checkpoint_text": {"type": ["string", "null"]},
+                    "risk": {
+                        "type": "string",
+                        "enum": ["safe", "mutating", "irreversible"],
+                    },
+                    "reason": {"type": ["string", "null"]},
+                },
+                "required": ["intent", "action", "ref"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "done",
+            "description": "Call only after every required output has been extracted.",
+            "parameters": {
+                "type": "object",
+                "properties": {"intent": {"type": "string"}},
+                "required": ["intent"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "stuck",
+            "description": "Call when the UI cannot be progressed safely.",
+            "parameters": {
+                "type": "object",
+                "properties": {"reason": {"type": "string"}},
+                "required": ["reason"],
+            },
+        },
+    },
+]
 
 
 DISCOVERY_SYSTEM_PROMPT = """You operate an unfamiliar UI to accomplish one goal.
-You receive a hybrid observation with ephemeral refs. Refs include nearby text,
-frame, element type and geometry; use them, never invent CSS or selectors.
+You receive a hybrid observation with ephemeral refs (c0, c1, …). Each ref includes
+nearby text, frame, element type and geometry. Choose a ref from the observation.
+Never invent CSS, selectors, or refs that are not listed.
 
-Reply with exactly one JSON object:
-- Act: {"kind":"act","intent":"...","action":"click|type|select|extract|dismiss",
-  "ref":"cN","input_name":"declared_name or null","literal":null,
-  "output":"declared_output or null","checkpoint_text":"visible text expected after action or null",
-  "risk":"safe|mutating|irreversible","reason":null}
-- Done: {"kind":"done","intent":"goal visibly satisfied", ... all other optional fields null}
-- Stuck: {"kind":"stuck","intent":"", "reason":"why", ...}
+Call exactly one tool:
+- act: click, type, select, extract, or dismiss a listed ref
+- done: only after every required output was extracted via act/extract
+- stuck: the UI cannot be progressed safely
 
 Rules:
-- To type, use input_name from declared_inputs, never the value itself. A
-  type/select action without input_name or a non-sensitive literal is rejected.
-- To extract, identify the ref holding the visible value and set output to the
-  declared output *name* (e.g. holds_count), never to the visible value itself.
-- Never repeat or expose secret values. Input values are intentionally hidden;
-  has_value=true means a field is already filled.
-- Include checkpoint_text for any click that changes screens.
-- Treat the current visible UI as authoritative over what you expected to see.
-- If feedback says the UI did not change, choose the next required field or a
-  different action instead of repeating the same one.
-- Do not declare done until every required output has been extracted via
-  action=extract. A done object must not invent output fields or values.
-
-When target_guidance is present it carries product-specific notes: a preferred
-frame to work in, and screen-by-screen expectations. Follow it, but defer to the
-visible observation whenever the two disagree."""
+- To type, set input_name to a declared input; never send the secret value.
+- To extract, set output to a declared output name, never the visible value.
+- has_value=true means a field is already filled; do not type it again.
+- For a click that changes screens, set checkpoint_text to visible destination text.
+- Treat the current observation as authoritative.
+- If feedback says the UI did not change, pick a different control or call stuck.
+"""
 
 
 EventSink = Callable[[str, dict[str, Any]], Awaitable[None]]
@@ -197,6 +248,11 @@ class DiscoveryLoop:
         max_steps: int = 20,
         event_sink: EventSink = _noop_event,
         confirmed_risks: set[Risk] | None = None,
+        handoff: Any | None = None,
+        evidence: Any | None = None,
+        on_intervention: Callable[[Any], Awaitable[bool]] | None = None,
+        capability_id: str = "discovery",
+        redact_values: list[str] | None = None,
     ) -> None:
         self.surface = surface
         self.model = model
@@ -204,6 +260,11 @@ class DiscoveryLoop:
         self.max_steps = max_steps
         self.event = event_sink
         self.confirmed_risks = confirmed_risks or set()
+        self.handoff = handoff
+        self.evidence = evidence
+        self.on_intervention = on_intervention
+        self.capability_id = capability_id
+        self.redact_values = redact_values or []
 
     async def run(
         self,
@@ -291,6 +352,16 @@ class DiscoveryLoop:
                 break
             if decision.kind == "stuck":
                 stop_reason = decision.reason or "agent_stuck"
+                if await self._intervene(
+                    goal=goal,
+                    reason=stop_reason,
+                    step_id=steps[-1].id if steps else None,
+                ):
+                    stagnant_actions = 0
+                    feedback = (
+                        "Operator returned the session. Continue from the current UI."
+                    )
+                    continue
                 break
             if decision.kind != "act" or not decision.action:
                 feedback = "Invalid decision: choose act, done, or stuck."
@@ -443,6 +514,16 @@ class DiscoveryLoop:
                 feedback = ""
             if stagnant_actions >= 3:
                 stop_reason = "dead_end"
+                if await self._intervene(
+                    goal=goal,
+                    reason="UI state did not change after repeated actions",
+                    step_id=steps[-1].id if steps else None,
+                ):
+                    stagnant_actions = 0
+                    feedback = (
+                        "Operator returned the session. Continue from the current UI."
+                    )
+                    continue
                 break
 
         completed = datetime.now(UTC)
@@ -463,4 +544,34 @@ class DiscoveryLoop:
             outputs=outputs,
             llm_calls=llm_calls,
         )
+
+    async def _intervene(
+        self, *, goal: str, reason: str, step_id: str | None
+    ) -> bool:
+        diagnostic = StepDiagnostic(
+            step_id=step_id,
+            code=FailureCode.ACTION_FAILED,
+            message=reason,
+            expected=goal,
+        )
+        await self.event(
+            "stuck",
+            diagnostic.model_dump(mode="json", exclude_none=True),
+        )
+        if self.handoff is None or self.evidence is None:
+            return False
+        await self.surface.pause()
+        payload = diagnostic.model_dump(mode="json", exclude_none=True)
+        if hasattr(self.evidence, "redactor"):
+            payload = self.evidence.redactor.data(payload)
+        intervention = await self.handoff.raise_intervention(
+            capability_id=self.capability_id,
+            goal=goal,
+            diagnostic=payload,
+            evidence_directory=self.evidence.directory,
+            redact_values=self.redact_values,
+        )
+        if self.on_intervention is None:
+            return False
+        return bool(await self.on_intervention(intervention))
 

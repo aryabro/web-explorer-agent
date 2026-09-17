@@ -1,0 +1,52 @@
+{
+  "status": "failure",
+  "error": {
+    "step_id": "s3",
+    "code": "CHECKPOINT_FAILED",
+    "message": "visible UI did not reach the recorded checkpoint",
+    "expected": "MEMBER PIGEONHOLE / LOOKUP",
+    "observed": "[night-nav] NIGHT WINDOW v4.1 NB JACKETS Member Search Sign On End Window North Bay Local terminal\n[night-work] MEMBER JACKET / LOOKUP Enter the five-digit member number from the paper jacket. Member number Search scope Active and dormant Active only Open jacket"
+  },
+  "completed_steps": [
+    "s1",
+    "s2",
+    "s3"
+  ],
+  "llm_calls": 0,
+  "locator_votes": [
+    {
+      "step_id": "s1",
+      "winners": [
+        "structural",
+        "geometry"
+      ],
+      "agreement": 2,
+      "weak": false,
+      "overridden": false,
+      "drifted": true
+    },
+    {
+      "step_id": "s2",
+      "winners": [
+        "structural",
+        "geometry"
+      ],
+      "agreement": 2,
+      "weak": false,
+      "overridden": false,
+      "drifted": true
+    },
+    {
+      "step_id": "s3",
+      "winners": [
+        "structural",
+        "geometry"
+      ],
+      "agreement": 2,
+      "weak": false,
+      "overridden": false,
+      "drifted": true
+    }
+  ],
+  "drift_score": 1.0
+}

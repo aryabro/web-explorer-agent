@@ -1,0 +1,11 @@
+{
+  "status": "failure",
+  "error": {
+    "code": "APPROVAL_REQUIRED",
+    "message": "draft capabilities require --allow-draft or approval"
+  },
+  "completed_steps": [],
+  "llm_calls": 0,
+  "locator_votes": [],
+  "drift_score": 0.0
+}

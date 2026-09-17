@@ -2,12 +2,20 @@ version: 1
 allowed_origins:
   - http://127.0.0.1:8765
   - http://localhost:8765
-  - https://www.monroetwplibrary.org
-  - https://monroetwplibrary.org
-  - https://mon.search.stellanj.org
 allowed_path_prefixes:
   - /
+  - /signin.html
+  - /search.html
+  - /detail.html
+  - /nav.html
+  - /static/
+  - /runtime-config.js
   - /tenant-b
+  - /open-account.html
+  - /confirm-account.html
+  - /created-account.html
+  - /drawer.html
+  - /not-found.html
 allowed_actions:
   - navigate
   - click
@@ -24,4 +32,3 @@ risk:
 deny_text_patterns:
   - '(?i)\b(delete|liquidate|wire transfer)\b'
   - '(?i)\bplace holds?\b'
-

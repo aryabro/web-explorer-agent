@@ -90,7 +90,7 @@ def compile_recording(
                 if isinstance(strategy, StructuralTarget)
             ]
             data["target"] = TargetBundle(
-                description="sensitive output element (value redacted)",
+                description=recorded.target.description,
                 strategies=structural,
             ).model_dump()
         steps.append(Step.model_validate(data))

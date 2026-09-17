@@ -8,6 +8,7 @@ from pigeonhole.contracts import (
     BusinessOutcome,
     Capability,
     EscalatedResult,
+    FailureCode,
     FailureResult,
     FatalState,
     InputValue,
@@ -22,6 +23,7 @@ from pigeonhole.contracts import (
 from pigeonhole.evidence import EvidenceWriter
 from pigeonhole.policy import PolicyEngine
 from pigeonhole.surface.base import SurfaceDriver
+from pigeonhole.surface.playwright import SurfaceResolutionError
 
 
 class ReplayEngine:
@@ -61,7 +63,7 @@ class ReplayEngine:
         if missing:
             return await self._failure(
                 StepDiagnostic(
-                    code="INPUT_INVALID",
+                    code=FailureCode.INPUT_INVALID,
                     message=f"missing required inputs: {', '.join(missing)}",
                 ),
                 [],
@@ -72,7 +74,7 @@ class ReplayEngine:
         if approval == "deprecated":
             return await self._failure(
                 StepDiagnostic(
-                    code="APPROVAL_REQUIRED",
+                    code=FailureCode.APPROVAL_REQUIRED,
                     message="deprecated capabilities cannot be replayed",
                 ),
                 [],
@@ -82,7 +84,7 @@ class ReplayEngine:
         if approval != "approved" and not self.allow_draft:
             return await self._failure(
                 StepDiagnostic(
-                    code="APPROVAL_REQUIRED",
+                    code=FailureCode.APPROVAL_REQUIRED,
                     message="draft capabilities require --allow-draft or approval",
                 ),
                 [],
@@ -92,7 +94,7 @@ class ReplayEngine:
         if len(capability.execution.steps) > self.policy.document["max_steps"]:
             return await self._failure(
                 StepDiagnostic(
-                    code="POLICY_DENIED",
+                    code=FailureCode.POLICY_DENIED,
                     message="capability exceeds the configured step budget",
                 ),
                 [],
@@ -108,19 +110,13 @@ class ReplayEngine:
 
         for step in capability.execution.steps[start_index:]:
             observation = await self.surface.observe()
-            outcome = self._detect_outcome(capability, observation.visible_text)
+            outcome = await self._detect_outcome(capability)
             if outcome:
                 return await self._outcome(outcome, completed, votes)
-            fatal = self._detect_fatal(capability, observation.visible_text)
+            fatal = await self._detect_fatal(capability)
             if fatal:
                 return await self._escalate_or_fail(
-                    StepDiagnostic(
-                        step_id=step.id,
-                        code=fatal.code,
-                        message=fatal.description,
-                        expected=step.intent,
-                        observed=fatal.visible_text,
-                    ),
+                    self._fatal_diagnostic(step.id, fatal),
                     completed,
                     inputs,
                     capability,
@@ -141,7 +137,7 @@ class ReplayEngine:
                 return await self._failure(
                     StepDiagnostic(
                         step_id=step.id,
-                        code="POLICY_DENIED",
+                        code=FailureCode.POLICY_DENIED,
                         message=decision.reason,
                     ),
                     completed,
@@ -152,7 +148,7 @@ class ReplayEngine:
                 return await self._escalate_or_fail(
                     StepDiagnostic(
                         step_id=step.id,
-                        code="POLICY_REQUIRES_CONFIRMATION",
+                        code=FailureCode.POLICY_REQUIRES_CONFIRMATION,
                         message=decision.reason,
                         expected=step.intent,
                     ),
@@ -191,7 +187,7 @@ class ReplayEngine:
                 return await self._escalate_or_fail(
                     StepDiagnostic(
                         step_id=step.id,
-                        code="ACTION_FAILED",
+                        code=self._action_failure_code(exc),
                         message=f"{type(exc).__name__}: {exc}",
                         expected=step.intent,
                     ),
@@ -226,7 +222,7 @@ class ReplayEngine:
         if missing_outputs:
             return await self._failure(
                 StepDiagnostic(
-                    code="OUTPUT_MISSING",
+                    code=FailureCode.OUTPUT_MISSING,
                     message=f"required outputs were not extracted: {sorted(missing_outputs)}",
                 ),
                 completed,
@@ -245,7 +241,7 @@ class ReplayEngine:
             if checkpoint and not await self.surface.checkpoint(checkpoint):
                 return await self._failure(
                     StepDiagnostic(
-                        code="SUCCESS_CONDITION_FAILED",
+                        code=FailureCode.SUCCESS_CONDITION_FAILED,
                         message="final visible UI condition is no longer present",
                         expected=checkpoint.expected,
                     ),
@@ -285,19 +281,14 @@ class ReplayEngine:
         deadline = asyncio.get_running_loop().time() + timeout_ms / 1000
         recovered = False
         while True:
-            observation = await self.surface.observe()
-            outcome = self._detect_outcome(capability, observation.visible_text)
+            await self.surface.observe()
+            outcome = await self._detect_outcome(capability)
             if outcome:
                 return await self._outcome(outcome, completed, votes)
-            fatal = self._detect_fatal(capability, observation.visible_text)
+            fatal = await self._detect_fatal(capability)
             if fatal:
                 return await self._escalate_or_fail(
-                    StepDiagnostic(
-                        step_id=step.id,
-                        code=fatal.code,
-                        message=fatal.description,
-                        observed=fatal.visible_text,
-                    ),
+                    self._fatal_diagnostic(step.id, fatal),
                     completed,
                     inputs,
                     capability,
@@ -331,14 +322,14 @@ class ReplayEngine:
                 break
             await asyncio.sleep(0.1)
         observed = (await self.surface.observe()).visible_text[-1000:]
-        outcome = self._detect_outcome(capability, observed)
+        outcome = await self._detect_outcome(capability)
         if outcome:
             return await self._outcome(outcome, completed, votes)
         assert step.checkpoint is not None
         return await self._escalate_or_fail(
             StepDiagnostic(
                 step_id=step.id,
-                code="CHECKPOINT_FAILED",
+                code=FailureCode.CHECKPOINT_FAILED,
                 message="visible UI did not reach the recorded checkpoint",
                 expected=step.checkpoint.expected,
                 observed=observed,
@@ -397,28 +388,41 @@ class ReplayEngine:
         self.evidence.write_json("result.json", result)
         return result
 
-    @staticmethod
-    def _detect_outcome(
-        capability: Capability, visible_text: str
-    ) -> BusinessOutcome | None:
-        return next(
-            (
-                outcome
-                for outcome in capability.contract.business_outcomes
-                if outcome.visible_text in visible_text
-            ),
-            None,
-        )
+    async def _detect_outcome(self, capability: Capability) -> BusinessOutcome | None:
+        for outcome in capability.contract.business_outcomes:
+            if await self.surface.checkpoint_visible(outcome.checkpoint):
+                return outcome
+        return None
+
+    async def _detect_fatal(self, capability: Capability) -> FatalState | None:
+        for state in capability.execution.fatal_states:
+            if await self.surface.checkpoint_visible(state.checkpoint):
+                return state
+        return None
 
     @staticmethod
-    def _detect_fatal(capability: Capability, visible_text: str) -> FatalState | None:
-        return next(
-            (
-                state
-                for state in capability.execution.fatal_states
-                if state.visible_text in visible_text
-            ),
-            None,
+    def _failure_code(raw: str) -> FailureCode:
+        try:
+            return FailureCode(raw)
+        except ValueError:
+            return FailureCode.ACTION_FAILED
+
+    @staticmethod
+    def _action_failure_code(exc: Exception) -> FailureCode:
+        if isinstance(exc, SurfaceResolutionError):
+            if "locator conflict" in str(exc).lower():
+                return FailureCode.LOCATOR_CONFLICT
+            return FailureCode.LOCATOR_UNRESOLVED
+        return FailureCode.ACTION_FAILED
+
+    @classmethod
+    def _fatal_diagnostic(cls, step_id: str, fatal: FatalState) -> StepDiagnostic:
+        return StepDiagnostic(
+            step_id=step_id,
+            code=cls._failure_code(fatal.code),
+            message=fatal.description,
+            expected=fatal.checkpoint.expected,
+            observed=fatal.checkpoint.expected,
         )
 
     async def _failure(

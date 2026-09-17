@@ -1,0 +1,53 @@
+{
+  "holder": "automation",
+  "operator_id": "operator-test",
+  "capability_id": "member.read_savings_balance",
+  "goal": "Signs into Night Window, opens a member jacket, and returns the visible current savings balance.",
+  "reason": {
+    "step_id": "s5",
+    "code": "SESSION_EXPIRED",
+    "message": "Night Window ended the authenticated session.",
+    "expected": "SESSION EXPIRED",
+    "observed": "SESSION EXPIRED"
+  },
+  "human_events": [
+    {
+      "at": "2026-09-16T21:45:21.586Z",
+      "event": "change",
+      "tag": "input",
+      "input_type": null,
+      "visible_text": null
+    },
+    {
+      "at": "2026-09-16T21:45:21.624Z",
+      "event": "change",
+      "tag": "input",
+      "input_type": "password",
+      "visible_text": null
+    },
+    {
+      "at": "2026-09-16T21:45:21.624Z",
+      "event": "click",
+      "tag": "button",
+      "input_type": null,
+      "visible_text": "Turn the key"
+    },
+    {
+      "at": "2026-09-16T21:45:21.689Z",
+      "event": "change",
+      "tag": "input",
+      "input_type": null,
+      "visible_text": null
+    },
+    {
+      "at": "2026-09-16T21:45:21.690Z",
+      "event": "click",
+      "tag": "button",
+      "input_type": null,
+      "visible_text": "Pull pigeonhole"
+    }
+  ],
+  "intervention_id": "ea72ccea4a88",
+  "returned_at": "2026-09-16T21:45:21.732685+00:00",
+  "note": "Restored the member detail view"
+}

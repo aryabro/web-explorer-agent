@@ -25,6 +25,20 @@ class Risk(StrEnum):
     IRREVERSIBLE = "irreversible"
 
 
+class FailureCode(StrEnum):
+    CHECKPOINT_FAILED = "CHECKPOINT_FAILED"
+    LOCATOR_UNRESOLVED = "LOCATOR_UNRESOLVED"
+    LOCATOR_CONFLICT = "LOCATOR_CONFLICT"
+    POLICY_DENIED = "POLICY_DENIED"
+    POLICY_REQUIRES_CONFIRMATION = "POLICY_REQUIRES_CONFIRMATION"
+    INPUT_INVALID = "INPUT_INVALID"
+    SESSION_EXPIRED = "SESSION_EXPIRED"
+    OUTPUT_MISSING = "OUTPUT_MISSING"
+    SUCCESS_CONDITION_FAILED = "SUCCESS_CONDITION_FAILED"
+    ACTION_FAILED = "ACTION_FAILED"
+    APPROVAL_REQUIRED = "APPROVAL_REQUIRED"
+
+
 class Parameter(StrictModel):
     type: Literal["string", "number", "boolean"]
     description: str
@@ -32,10 +46,39 @@ class Parameter(StrictModel):
     required: bool = True
 
 
+class Checkpoint(StrictModel):
+    id: str
+    kind: Literal["visible_text", "element_visible", "url_contains"]
+    expected: str
+    frame: str | None = None
+    timeout_ms: int = Field(default=5000, ge=100, le=60000)
+
+
+def _checkpoint_from_visible(code: str, visible: str) -> dict[str, Any]:
+    return {
+        "id": f"state-{code.lower().replace('_', '-')}",
+        "kind": "visible_text",
+        "expected": visible,
+    }
+
+
 class BusinessOutcome(StrictModel):
     code: str
     description: str
-    visible_text: str
+    checkpoint: Checkpoint
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_visible_text(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        payload = dict(data)
+        visible = payload.pop("visible_text", None)
+        if "checkpoint" not in payload and visible:
+            payload["checkpoint"] = _checkpoint_from_visible(
+                str(payload.get("code", "outcome")), visible
+            )
+        return payload
 
 
 class FatalState(StrictModel):
@@ -43,7 +86,20 @@ class FatalState(StrictModel):
 
     code: str
     description: str
-    visible_text: str
+    checkpoint: Checkpoint
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_visible_text(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        payload = dict(data)
+        visible = payload.pop("visible_text", None)
+        if "checkpoint" not in payload and visible:
+            payload["checkpoint"] = _checkpoint_from_visible(
+                str(payload.get("code", "fatal")), visible
+            )
+        return payload
 
 
 class Contract(StrictModel):
@@ -155,14 +211,6 @@ class Action(StrictModel):
     output: str | None = None
 
 
-class Checkpoint(StrictModel):
-    id: str
-    kind: Literal["visible_text", "element_visible", "url_contains"]
-    expected: str
-    frame: str | None = None
-    timeout_ms: int = Field(default=5000, ge=100, le=60000)
-
-
 class Recovery(StrictModel):
     kind: Literal["dismiss_interstitial", "retry_once"]
     visible_text: str
@@ -251,7 +299,7 @@ class Capability(StrictModel):
 
 class StepDiagnostic(StrictModel):
     step_id: str | None = None
-    code: str
+    code: FailureCode
     message: str
     expected: str | None = None
     observed: str | None = None

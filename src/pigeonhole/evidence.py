@@ -10,6 +10,8 @@ from pydantic import BaseModel
 
 from pigeonhole.redact import Redactor
 
+LOCATOR_IDENTITY_KEYS = {"target", "strategies"}
+
 
 class EvidenceWriter:
     def __init__(
@@ -47,7 +49,7 @@ class EvidenceWriter:
         record = {
             "at": datetime.now(UTC).isoformat(),
             "type": event_type,
-            "payload": self.redactor.data(payload),
+            "payload": self._redact_sink(payload),
         }
         with self._trace.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
@@ -57,7 +59,7 @@ class EvidenceWriter:
             value = value.model_dump(mode="json", exclude_none=True)
         destination = self.directory / name
         destination.write_text(
-            json.dumps(self.redactor.data(value), indent=2, ensure_ascii=False),
+            json.dumps(self._redact_sink(value), indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
         return destination
@@ -69,7 +71,29 @@ class EvidenceWriter:
                 if isinstance(row, BaseModel):
                     row = row.model_dump(mode="json", exclude_none=True)
                 handle.write(
-                    json.dumps(self.redactor.data(row), ensure_ascii=False) + "\n"
+                    json.dumps(self._redact_sink(row), ensure_ascii=False) + "\n"
                 )
         return destination
+
+    def _redact_sink(self, value: Any) -> Any:
+        return _redact_preserving_locators(self.redactor, value)
+
+
+def _redact_preserving_locators(redactor: Redactor, value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: (
+                item
+                if key in LOCATOR_IDENTITY_KEYS
+                else _redact_preserving_locators(redactor, item)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_preserving_locators(redactor, item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_preserving_locators(redactor, item) for item in value)
+    if isinstance(value, str):
+        return redactor.text(value)
+    return value
 

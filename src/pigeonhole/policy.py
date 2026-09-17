@@ -38,10 +38,7 @@ class PolicyEngine:
             return PolicyDecision(
                 disposition="deny", reason=f"origin is not allowlisted: {origin}"
             )
-        if not any(
-            parsed.path.startswith(prefix)
-            for prefix in self.document["allowed_path_prefixes"]
-        ):
+        if not self._path_allowed(parsed.path):
             return PolicyDecision(
                 disposition="deny", reason=f"path is not allowlisted: {parsed.path}"
             )
@@ -59,4 +56,15 @@ class PolicyEngine:
             disposition=disposition,
             reason=f"{risk} actions are configured as {disposition}",
         )
+
+    def _path_allowed(self, path: str) -> bool:
+        normalized = path or "/"
+        for prefix in self.document["allowed_path_prefixes"]:
+            if prefix == "/":
+                if normalized == "/":
+                    return True
+                continue
+            if normalized.startswith(prefix):
+                return True
+        return False
 

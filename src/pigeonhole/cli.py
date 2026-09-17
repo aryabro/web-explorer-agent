@@ -55,6 +55,24 @@ def _known_sensitive(definitions: dict, values: dict[str, str]) -> list[str]:
     ]
 
 
+async def _headed_return(coordinator: HandoffCoordinator, intervention_id: str) -> None:
+    server = uvicorn.Server(
+        uvicorn.Config(
+            coordinator.operator_app(),
+            host="127.0.0.1",
+            port=8766,
+            log_level="warning",
+        )
+    )
+    server_task = asyncio.create_task(server.serve())
+    typer.echo(f"intervention {intervention_id}: http://127.0.0.1:8766/")
+    try:
+        await coordinator.wait_for_return(intervention_id)
+    finally:
+        server.should_exit = True
+        await server_task
+
+
 @app.command()
 def discover(
     job_path: Annotated[Path, typer.Option("--job")] = Path("jobs/read_savings.yaml"),
@@ -81,6 +99,14 @@ async def _discover(
         redactor=redactor,
     )
     surface = await PlaywrightSurface.launch(headless=headless)
+    coordinator = HandoffCoordinator(surface)
+
+    async def on_intervention(intervention) -> bool:
+        if headless:
+            return False
+        await _headed_return(coordinator, intervention.id)
+        return True
+
     try:
         loop = DiscoveryLoop(
             surface,
@@ -89,6 +115,11 @@ async def _discover(
             max_steps=job.max_steps,
             event_sink=evidence.event,
             confirmed_risks={Risk.MUTATING} if allow_mutating else set(),
+            handoff=coordinator,
+            evidence=evidence,
+            on_intervention=on_intervention,
+            capability_id=job.capability_id,
+            redact_values=list(inputs.values()),
         )
         result = await loop.run(
             goal=job.goal,
@@ -204,8 +235,6 @@ async def _replay(
     )
     surface = await PlaywrightSurface.launch(headless=headless)
     coordinator = HandoffCoordinator(surface) if handoff_enabled else None
-    server = None
-    server_task = None
     try:
         if fault:
             await surface.act(
@@ -225,19 +254,7 @@ async def _replay(
         )
         result = await engine.run(capability, inputs, navigate=not fault)
         if result.status == "escalated" and coordinator and not headless:
-            server = uvicorn.Server(
-                uvicorn.Config(
-                    coordinator.operator_app(),
-                    host="127.0.0.1",
-                    port=8766,
-                    log_level="warning",
-                )
-            )
-            server_task = asyncio.create_task(server.serve())
-            typer.echo(
-                f"intervention {result.intervention_id}: http://127.0.0.1:8766/"
-            )
-            await coordinator.wait_for_return(result.intervention_id)
+            await _headed_return(coordinator, result.intervention_id)
             start_index = await engine.resume_index(capability)
             await evidence.event(
                 "resumed",
@@ -249,10 +266,6 @@ async def _replay(
         typer.echo(json.dumps(result.model_dump(mode="json"), indent=2))
         typer.echo(f"evidence: {evidence.directory}")
     finally:
-        if server:
-            server.should_exit = True
-        if server_task:
-            await server_task
         await surface.close()
 
 

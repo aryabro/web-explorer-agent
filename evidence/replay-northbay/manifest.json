@@ -1,0 +1,9 @@
+{
+  "run_id": "replay-northbay",
+  "kind": "replay",
+  "goal": "Signs into Night Window, opens a member jacket, and returns the visible current savings balance.",
+  "target": "http://127.0.0.1:8765/",
+  "model": null,
+  "started_at": "2026-09-16T21:45:21.885394+00:00",
+  "schema_version": "1.0.0"
+}

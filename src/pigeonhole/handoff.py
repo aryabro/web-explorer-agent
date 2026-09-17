@@ -140,15 +140,20 @@ class HandoffCoordinator:
         intervention.status = "returned"
         intervention.note = note
         self._persist(intervention)
+        lease_state = await self.lease.state()
         directory = self._directories[intervention_id]
         (directory / "handoff.json").write_text(
             json.dumps(
                 {
-                    "intervention_id": intervention_id,
+                    "holder": lease_state.holder,
                     "operator_id": operator_id,
+                    "capability_id": intervention.capability_id,
+                    "goal": intervention.goal,
+                    "reason": intervention.diagnostic,
+                    "human_events": events,
+                    "intervention_id": intervention_id,
                     "returned_at": datetime.now(UTC).isoformat(),
                     "note": note,
-                    "human_events": events,
                 },
                 indent=2,
             ),

@@ -117,6 +117,22 @@ def test_policy_default_deny_and_risk(policy: PolicyEngine) -> None:
     )
     assert (
         policy.evaluate(
+            url="http://127.0.0.1:8765/signin.html",
+            action="click",
+            risk=Risk.SAFE,
+        ).disposition
+        == "allow"
+    )
+    assert (
+        policy.evaluate(
+            url="http://127.0.0.1:8765/tenant-b/detail.html",
+            action="click",
+            risk=Risk.SAFE,
+        ).disposition
+        == "allow"
+    )
+    assert (
+        policy.evaluate(
             url="http://127.0.0.1:8765/",
             action="click",
             risk=Risk.MUTATING,
@@ -141,26 +157,17 @@ def test_policy_default_deny_and_risk(policy: PolicyEngine) -> None:
     )
     assert (
         policy.evaluate(
+            url="http://127.0.0.1:8765/admin",
+            action="click",
+            risk=Risk.SAFE,
+        ).disposition
+        == "deny"
+    )
+    assert (
+        policy.evaluate(
             url="https://www.monroetwplibrary.org/",
             action="click",
             risk=Risk.SAFE,
-        ).disposition
-        == "allow"
-    )
-    assert (
-        policy.evaluate(
-            url="https://mon.search.stellanj.org/search",
-            action="click",
-            risk=Risk.SAFE,
-        ).disposition
-        == "allow"
-    )
-    assert (
-        policy.evaluate(
-            url="https://mon.search.stellanj.org/search",
-            action="click",
-            risk=Risk.SAFE,
-            intent="Place Holds on the first title",
         ).disposition
         == "deny"
     )
@@ -250,6 +257,7 @@ async def test_discovery_compile_and_replay_real_ui(
         )
         serialized = capability.model_dump_json()
         assert "1937" not in serialized
+        assert "value redacted" not in serialized.lower()
         assert len(capability.execution.steps[0].target.strategies) == 3
     finally:
         await discovery_surface.close()
@@ -443,6 +451,7 @@ async def test_same_session_handoff_and_checkpoint_resume(
         )
         first = await engine.run(capability, inputs)
         assert first.status == "escalated"
+        assert first.reason.code == "SESSION_EXPIRED"
         assert (await coordinator.lease.state()).holder is None
 
         await coordinator.claim(first.intervention_id, "operator-test")

@@ -42,14 +42,26 @@ outputs:
 business_outcomes:
   - code: MEMBER_NOT_FOUND
     description: No member jacket exists for the supplied number.
-    visible_text: NO MATCHING MEMBER
+    checkpoint:
+      id: outcome-member-not-found
+      kind: visible_text
+      expected: NO MATCHING MEMBER
+      frame: night-work
   - code: PERMISSION_DENIED
     description: The signed-in operator cannot access the member jacket.
-    visible_text: PERMISSION DENIED
+    checkpoint:
+      id: outcome-permission-denied
+      kind: visible_text
+      expected: PERMISSION DENIED
+      frame: night-work
 fatal_states:
   - code: SESSION_EXPIRED
     description: Night Window ended the authenticated session.
-    visible_text: SESSION EXPIRED
+    checkpoint:
+      id: fatal-session-expired
+      kind: visible_text
+      expected: SESSION EXPIRED
+      frame: night-work
 click_recoveries:
   - kind: dismiss_interstitial
     visible_text: NOTICE FROM RECORDS
@@ -57,15 +69,4 @@ click_recoveries:
   - kind: retry_once
     visible_text: Index turning...
 preferred_frame: night-work
-discovery_hints:
-  - The "Operator code" field takes operator_id and "Brass key (PIN)" takes pin.
-  - The "Member number" field takes member_id.
-  - Navigation-frame links are for recovery only; never click "Sign On" from the
-    lookup screen.
-  - On WINDOW AUTHORITY, fill operator_id and pin, then click "Turn the key".
-  - On MEMBER PIGEONHOLE / LOOKUP, fill member_id, then click "Pull pigeonhole".
-  - From the member jacket, open the new sub-account form, fill product,
-    nickname and opening_deposit, then review before confirming.
-  - Creating the account is a mutating action; extract the displayed account
-    identifier into account_id once the confirmation screen is visible.
 

@@ -1,60 +1,147 @@
-"""Write locator-vote, tenant, draft-gate, and catalog evidence.
+"""Write replay evidence bundles against the committed genuine capability.
 
-Uses the committed genuine read-savings capability. Does not overwrite it.
-Requires Night Window on :8765.
+Does not overwrite evidence/discovery-20260916T195717Z-60d257.
+Requires nothing except Chromium; starts Night Window on :8765 if needed.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import socket
+import threading
 from pathlib import Path
+
+import uvicorn
 
 from pigeonhole.catalog import iter_capabilities, summarize, tool_definitions
 from pigeonhole.evidence import EvidenceWriter
+from pigeonhole.handoff import HandoffCoordinator
 from pigeonhole.policy import PolicyEngine
 from pigeonhole.redact import Redactor
 from pigeonhole.replay import ReplayEngine, load_capability
 from pigeonhole.surface.playwright import PlaywrightSurface
 from pigeonhole.tenants import apply_tenant, find_profile
+from target.server import app as night_window
 
 ROOT = Path("evidence")
 POLICY = PolicyEngine.load()
 CAPABILITY = load_capability("capabilities/member.read_savings_balance.json")
 INPUTS = {"operator_id": "teller7", "pin": "1937", "member_id": "12345"}
+GENUINE_DISCOVERY = "discovery-20260916T195717Z-60d257"
 
 
-async def replay(
-    run_id: str,
-    capability,
-    inputs: dict[str, str],
-    *,
-    allow_draft: bool = True,
-) -> None:
-    redactor = Redactor(list(inputs.values()) + ["$1842.37"])
-    writer = EvidenceWriter(
+def _ensure_night_window() -> None:
+    with socket.socket() as client:
+        if client.connect_ex(("127.0.0.1", 8765)) == 0:
+            return
+    config = uvicorn.Config(night_window, host="127.0.0.1", port=8765, log_level="error")
+    server = uvicorn.Server(config)
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    for _ in range(200):
+        with socket.socket() as client:
+            if client.connect_ex(("127.0.0.1", 8765)) == 0:
+                return
+        threading.Event().wait(0.05)
+    raise RuntimeError("Night Window did not start")
+
+
+async def _engine(surface, writer, *, allow_draft=True, handoff=None):
+    return ReplayEngine(
+        surface=surface,
+        policy=POLICY,
+        evidence=writer,
+        handoff=handoff,
+        allow_draft=allow_draft,
+    )
+
+
+def _writer(run_id: str, inputs: dict[str, str], extra: list[str] | None = None):
+    redactor = Redactor(list(inputs.values()) + (extra or ["$1842.37"]))
+    return EvidenceWriter(
         kind="replay",
-        goal=capability.contract.description,
-        target=capability.compatibility.surface.entry_point,
+        goal=CAPABILITY.contract.description,
+        target=CAPABILITY.compatibility.surface.entry_point,
         model=None,
         redactor=redactor,
         root=ROOT,
         run_id=run_id,
     )
+
+
+async def replay_named(
+    run_id: str,
+    *,
+    capability=None,
+    inputs: dict[str, str] | None = None,
+    allow_draft: bool = True,
+    fault: str | None = None,
+    handoff: bool = False,
+) -> None:
+    capability = capability or CAPABILITY
+    inputs = inputs or INPUTS
+    writer = _writer(run_id, inputs)
     surface = await PlaywrightSurface.launch(headless=True)
+    coordinator = HandoffCoordinator(surface) if handoff else None
     try:
-        result = await ReplayEngine(
-            surface=surface,
-            policy=POLICY,
-            evidence=writer,
-            allow_draft=allow_draft,
-        ).run(capability, inputs)
-        print(run_id, result.status, getattr(result, "drift_score", None))
+        if fault:
+            await surface.act(
+                "navigate", value=capability.compatibility.surface.entry_point
+            )
+            await surface.page.evaluate(
+                "(value) => sessionStorage.setItem('night-window:fault', value)",
+                fault,
+            )
+        engine = await _engine(
+            surface, writer, allow_draft=allow_draft, handoff=coordinator
+        )
+        result = await engine.run(capability, inputs, navigate=not fault)
+        print(run_id, result.status, getattr(result, "error", None) or getattr(result, "code", None))
+    finally:
+        await surface.close()
+
+
+async def replay_handoff(run_id: str = "replay-handoff") -> None:
+    writer = _writer(run_id, INPUTS)
+    surface = await PlaywrightSurface.launch(headless=True)
+    coordinator = HandoffCoordinator(surface)
+    engine = await _engine(surface, writer, handoff=coordinator)
+    try:
+        await surface.act(
+            "navigate", value=CAPABILITY.compatibility.surface.entry_point
+        )
+        await surface.page.evaluate(
+            "() => sessionStorage.setItem('night-window:fault', 'session_drop')"
+        )
+        first = await engine.run(CAPABILITY, INPUTS)
+        assert first.status == "escalated"
+        await coordinator.claim(first.intervention_id, "operator-test")
+        work = surface.page.frame(name="night-work")
+        assert work is not None
+        await work.locator("input").nth(0).fill("teller7")
+        await work.locator("input").nth(1).fill("1937")
+        await work.locator("button").click()
+        await work.wait_for_url("**/search.html")
+        await work.locator("input").first.fill("12345")
+        await work.get_by_text("Pull pigeonhole", exact=True).click()
+        await work.get_by_text("SAVINGS BALANCE READY").wait_for()
+        await coordinator.hand_back(
+            first.intervention_id, "operator-test", "Restored the member detail view"
+        )
+        resume_at = await engine.resume_index(CAPABILITY)
+        final = await engine.run(
+            CAPABILITY, INPUTS, start_index=resume_at, navigate=False
+        )
+        print(run_id, first.status, final.status, resume_at)
     finally:
         await surface.close()
 
 
 async def main() -> None:
+    if not (ROOT / GENUINE_DISCOVERY).exists():
+        raise SystemExit(f"keep {GENUINE_DISCOVERY}; it is missing")
+    _ensure_night_window()
     ROOT.mkdir(exist_ok=True)
     (ROOT / "catalog.json").write_text(
         json.dumps(
@@ -70,13 +157,22 @@ async def main() -> None:
         encoding="utf-8",
     )
     print("wrote evidence/catalog.json")
-    await replay("replay-locator-votes", CAPABILITY, INPUTS)
+    await replay_named("replay-happy-12345")
+    await replay_named(
+        "replay-member-not-found",
+        inputs={**INPUTS, "member_id": "00000"},
+    )
+    await replay_named("replay-interstitial", fault="interstitial")
+    await replay_named("replay-session-expired", fault="session_drop", handoff=False)
+    await replay_named("replay-draft-denied", allow_draft=False)
+    await replay_handoff()
     northbay = apply_tenant(CAPABILITY, find_profile("northbay"))
-    await replay("replay-northbay", northbay, INPUTS)
+    await replay_named("replay-northbay", capability=northbay)
     drifted = CAPABILITY.model_copy(deep=True)
-    drifted.compatibility.surface.entry_point = northbay.compatibility.surface.entry_point
-    await replay("replay-northbay-drift", drifted, INPUTS)
-    await replay("replay-draft-denied", CAPABILITY, INPUTS, allow_draft=False)
+    drifted.compatibility.surface.entry_point = (
+        northbay.compatibility.surface.entry_point
+    )
+    await replay_named("replay-northbay-drift", capability=drifted)
 
 
 if __name__ == "__main__":
