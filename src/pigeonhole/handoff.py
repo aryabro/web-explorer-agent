@@ -5,7 +5,7 @@ import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Awaitable, Callable, Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
@@ -75,16 +75,27 @@ class Intervention(BaseModel):
     capability_id: str
     goal: str
     diagnostic: dict[str, Any]
+    step_id: str | None = None
     raised_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     status: Literal["waiting", "operator", "returned", "aborted"] = "waiting"
     operator_id: str | None = None
     note: str | None = None
 
 
+async def _noop_event(_: str, __: dict[str, Any]) -> None:
+    return None
+
+
 class HandoffCoordinator:
-    def __init__(self, surface: SurfaceDriver, lease: SessionLease | None = None) -> None:
+    def __init__(
+        self,
+        surface: SurfaceDriver,
+        lease: SessionLease | None = None,
+        event_sink: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None,
+    ) -> None:
         self.surface = surface
         self.lease = lease or SessionLease()
+        self.event = event_sink or _noop_event
         self.interventions: dict[str, Intervention] = {}
         self._returned: dict[str, asyncio.Event] = {}
         self._directories: dict[str, Path] = {}
@@ -97,6 +108,7 @@ class HandoffCoordinator:
         diagnostic: Any,
         evidence_directory: Path,
         redact_values: list[str] | None = None,
+        step_id: str | None = None,
     ) -> Intervention:
         await self.lease.cede()
         await self.surface.start_human_capture()
@@ -109,6 +121,7 @@ class HandoffCoordinator:
             capability_id=capability_id,
             goal=goal,
             diagnostic=diagnostic_data,
+            step_id=step_id or diagnostic_data.get("step_id"),
         )
         self.interventions[intervention.id] = intervention
         self._returned[intervention.id] = asyncio.Event()
@@ -121,6 +134,15 @@ class HandoffCoordinator:
             str(evidence_directory / "screenshots" / "intervention.png"),
             redact_values,
         )
+        await self.event(
+            "handoff_raised",
+            {
+                "intervention_id": intervention.id,
+                "capability_id": capability_id,
+                "step_id": intervention.step_id,
+                "holder": None,
+            },
+        )
         return intervention
 
     async def claim(self, intervention_id: str, operator_id: str) -> Intervention:
@@ -129,6 +151,15 @@ class HandoffCoordinator:
         intervention.status = "operator"
         intervention.operator_id = operator_id
         self._persist(intervention)
+        await self.event(
+            "handoff_claimed",
+            {
+                "intervention_id": intervention.id,
+                "operator_id": operator_id,
+                "holder": "operator",
+                "step_id": intervention.step_id,
+            },
+        )
         return intervention
 
     async def hand_back(
@@ -160,6 +191,17 @@ class HandoffCoordinator:
             encoding="utf-8",
         )
         await self.surface.resume()
+        await self.event(
+            "handoff_returned",
+            {
+                "intervention_id": intervention_id,
+                "operator_id": operator_id,
+                "holder": lease_state.holder,
+                "human_event_count": len(events),
+                "note": note,
+                "step_id": intervention.step_id,
+            },
+        )
         self._returned[intervention_id].set()
         return intervention
 

@@ -1,5 +1,11 @@
-from .base import ControlObservation, Observation, SurfaceDriver
-from .playwright import PlaywrightSurface
+from pigeonhole.surface.base import ControlObservation, Observation, SurfaceDriver, SurfaceResolutionError
+from pigeonhole.surface.playwright import PlaywrightSurface
 
-__all__ = ["ControlObservation", "Observation", "PlaywrightSurface", "SurfaceDriver"]
+__all__ = [
+    "ControlObservation",
+    "Observation",
+    "PlaywrightSurface",
+    "SurfaceDriver",
+    "SurfaceResolutionError",
+]
 

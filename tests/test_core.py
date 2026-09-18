@@ -19,8 +19,8 @@ from pigeonhole.handoff import HandoffCoordinator, SessionLease
 from pigeonhole.policy import PolicyEngine
 from pigeonhole.redact import Redactor
 from pigeonhole.replay import ReplayEngine, load_capability
-from pigeonhole.surface.playwright import PlaywrightSurface
 from pigeonhole.tenants import apply_tenant, find_profile
+from target.profile import launch_browser
 
 
 class ScriptedLookupModel:
@@ -106,6 +106,28 @@ def policy() -> PolicyEngine:
     return PolicyEngine.load("policy.yaml")
 
 
+async def _compile_read_savings(policy: PolicyEngine):
+    inputs = {"operator_id": "teller7", "pin": "1937", "member_id": "12345"}
+    job = Job.load("jobs/read_savings.yaml")
+    surface = await launch_browser(headless=True)
+    try:
+        result = await DiscoveryLoop(
+            surface, ScriptedLookupModel(), policy, max_steps=job.max_steps
+        ).run(
+            goal=job.goal,
+            target=job.target,
+            inputs=inputs,
+            input_names=list(job.inputs),
+            required_outputs=list(job.outputs),
+            hints=job.discovery_hints,
+            preferred_frame=job.preferred_frame,
+            click_recoveries=job.click_recoveries,
+        )
+        return compile_recording(result.recording, job, trace_ref="test"), inputs
+    finally:
+        await surface.close()
+
+
 def test_policy_default_deny_and_risk(policy: PolicyEngine) -> None:
     assert (
         policy.evaluate(
@@ -180,6 +202,7 @@ def test_catalog_holds_job_is_loadable() -> None:
     assert "holds_count" in job.outputs
     assert job.fatal_states == []
     assert job.click_recoveries[0].action_text == "Close"
+    assert job.click_recoveries[0].strategy == "dismiss"
 
 
 def test_secret_definitions_allowed_but_secret_literals_impossible() -> None:
@@ -222,7 +245,7 @@ async def test_discovery_compile_and_replay_real_ui(
 ) -> None:
     inputs = {"operator_id": "teller7", "pin": "1937", "member_id": "12345"}
     job = Job.load("jobs/read_savings.yaml")
-    discovery_surface = await PlaywrightSurface.launch(headless=True)
+    discovery_surface = await launch_browser(headless=True)
     try:
         discovery_evidence = EvidenceWriter(
             kind="test-discovery",
@@ -262,7 +285,7 @@ async def test_discovery_compile_and_replay_real_ui(
     finally:
         await discovery_surface.close()
 
-    replay_surface = await PlaywrightSurface.launch(headless=True)
+    replay_surface = await launch_browser(headless=True)
     try:
         replay_evidence = EvidenceWriter(
             kind="test-replay",
@@ -301,7 +324,7 @@ async def test_business_outcome_and_interstitial_recovery(
 ) -> None:
     job = Job.load("jobs/read_savings.yaml")
     inputs = {"operator_id": "teller7", "pin": "1937", "member_id": "12345"}
-    discover = await PlaywrightSurface.launch(headless=True)
+    discover = await launch_browser(headless=True)
     try:
         result = await DiscoveryLoop(
             discover, ScriptedLookupModel(), policy, max_steps=job.max_steps
@@ -323,7 +346,7 @@ async def test_business_outcome_and_interstitial_recovery(
         ("00000", None, "outcome"),
         ("12345", "interstitial", "success"),
     ]:
-        surface = await PlaywrightSurface.launch(headless=True)
+        surface = await launch_browser(headless=True)
         run_inputs = {**inputs, "member_id": member_id}
         try:
             if fault:
@@ -363,7 +386,7 @@ async def test_mutating_flow_uses_ui_success_and_storage_oracle(
         "nickname": "Trip",
         "opening_deposit": "10.00",
     }
-    discovery = await PlaywrightSurface.launch(headless=True)
+    discovery = await launch_browser(headless=True)
     try:
         result = await DiscoveryLoop(
             discovery,
@@ -386,7 +409,7 @@ async def test_mutating_flow_uses_ui_success_and_storage_oracle(
     finally:
         await discovery.close()
 
-    surface = await PlaywrightSurface.launch(headless=True)
+    surface = await launch_browser(headless=True)
     try:
         await surface.act("navigate", value=job.target)
         await surface.observe()
@@ -423,10 +446,8 @@ async def test_mutating_flow_uses_ui_success_and_storage_oracle(
 async def test_same_session_handoff_and_checkpoint_resume(
     tmp_path: Path, policy: PolicyEngine
 ) -> None:
-    capability = load_capability("capabilities/member.read_savings_balance.json")
-    inputs = {"operator_id": "teller7", "pin": "1937", "member_id": "12345"}
-    surface = await PlaywrightSurface.launch(headless=True)
-    coordinator = HandoffCoordinator(surface)
+    capability, inputs = await _compile_read_savings(policy)
+    surface = await launch_browser(headless=True)
     evidence = EvidenceWriter(
         kind="test-handoff",
         goal=capability.contract.description,
@@ -435,6 +456,7 @@ async def test_same_session_handoff_and_checkpoint_resume(
         redactor=Redactor(list(inputs.values())),
         root=tmp_path,
     )
+    coordinator = HandoffCoordinator(surface, event_sink=evidence.event)
     engine = ReplayEngine(
         surface=surface,
         policy=policy,
@@ -468,17 +490,19 @@ async def test_same_session_handoff_and_checkpoint_resume(
             first.intervention_id, "operator-test", "Restored the member detail view"
         )
 
-        resume_at = await engine.resume_index(capability)
-        assert resume_at == 5
-        final = await engine.run(
-            capability, inputs, start_index=resume_at, navigate=False
-        )
+        final = await engine.continue_after_handoff(capability, inputs)
         assert final.status == "success"
+        assert final.llm_calls == 0
         audit = (evidence.directory / "handoff.json").read_text(encoding="utf-8")
         assert "operator-test" in audit
         assert '"event": "click"' in audit
         assert "1937" not in audit
         assert "12345" not in audit
+        trace = (evidence.directory / "trace.jsonl").read_text(encoding="utf-8")
+        assert "handoff_claimed" in trace
+        assert "handoff_returned" in trace
+        assert "resumed" in trace
+        assert '"basis": "live checkpoints"' in trace
     finally:
         await surface.close()
 
@@ -500,7 +524,7 @@ async def test_draft_replay_is_rejected_without_override(
 ) -> None:
     capability = load_capability("capabilities/member.read_savings_balance.json")
     assert capability.governance.approval.status == "draft"
-    surface = await PlaywrightSurface.launch(headless=True)
+    surface = await launch_browser(headless=True)
     try:
         evidence = EvidenceWriter(
             kind="test-draft",
@@ -538,12 +562,11 @@ def test_catalog_lists_and_emits_tool_defs() -> None:
 async def test_northbay_override_replays_and_bare_tenant_drifts(
     tmp_path: Path, policy: PolicyEngine
 ) -> None:
-    capability = load_capability("capabilities/member.read_savings_balance.json")
-    inputs = {"operator_id": "teller7", "pin": "1937", "member_id": "12345"}
+    capability, inputs = await _compile_read_savings(policy)
     profile = find_profile("northbay")
     specialized = apply_tenant(capability, profile)
 
-    surface = await PlaywrightSurface.launch(headless=True)
+    surface = await launch_browser(headless=True)
     try:
         evidence = EvidenceWriter(
             kind="test-tenant-b",
@@ -561,14 +584,16 @@ async def test_northbay_override_replays_and_bare_tenant_drifts(
         ).run(specialized, inputs)
         assert replay.status == "success"
         assert replay.outputs["savings_balance"] == "$1842.37"
-        assert replay.drift_score > 0
+        assert replay.override_score > 0
+        assert replay.drift_score == 0
         assert any(vote.overridden for vote in replay.locator_votes)
+        assert not any(vote.drifted for vote in replay.locator_votes)
     finally:
         await surface.close()
 
     drifted = capability.model_copy(deep=True)
     drifted.compatibility.surface.entry_point = profile.entry_point
-    surface = await PlaywrightSurface.launch(headless=True)
+    surface = await launch_browser(headless=True)
     try:
         evidence = EvidenceWriter(
             kind="test-tenant-drift",

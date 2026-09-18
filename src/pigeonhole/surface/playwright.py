@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -12,7 +11,6 @@ from urllib.parse import urlparse
 from playwright.async_api import Browser, BrowserContext, Frame, Locator, Page, async_playwright
 
 from pigeonhole.contracts import (
-    BoundingBox,
     Checkpoint,
     GeometryTarget,
     Recovery,
@@ -20,11 +18,9 @@ from pigeonhole.contracts import (
     StructuralTarget,
     TargetBundle,
 )
-from pigeonhole.surface.base import ControlObservation, Observation
-
-
-class SurfaceResolutionError(RuntimeError):
-    pass
+from pigeonhole.surface.base import Observation, SurfaceResolutionError
+from pigeonhole.surface.perception import assemble_observation, control_from_snapshot, harvest_target
+from pigeonhole.surface.resolution import vote_identities
 
 
 @dataclass
@@ -45,18 +41,29 @@ class PlaywrightSurface:
         context: BrowserContext,
         browser: Browser,
         playwright: Any,
+        *,
+        skip_frames: Sequence[str] = (),
+        cover_frames: Sequence[str] = (),
     ) -> None:
         self.page = page
         self.context = context
         self.browser = browser
         self._playwright = playwright
+        self._skip_frames = frozenset(skip_frames)
+        self._cover_frames = frozenset(cover_frames)
         self._refs: dict[str, tuple[Frame, int, dict[str, Any]]] = {}
         self._paused = asyncio.Event()
         self._paused.set()
         self.last_vote: LocatorVote | None = None
 
     @classmethod
-    async def launch(cls, *, headless: bool = True) -> "PlaywrightSurface":
+    async def launch(
+        cls,
+        *,
+        headless: bool = True,
+        skip_frames: Sequence[str] = (),
+        cover_frames: Sequence[str] = (),
+    ) -> "PlaywrightSurface":
         playwright = await async_playwright().start()
         launch_options: dict[str, Any] = {"headless": headless}
         configured = Path(playwright.chromium.executable_path)
@@ -88,7 +95,14 @@ class PlaywrightSurface:
         browser = await playwright.chromium.launch(**launch_options)
         context = await browser.new_context(viewport={"width": 1440, "height": 900})
         page = await context.new_page()
-        surface = cls(page, context, browser, playwright)
+        surface = cls(
+            page,
+            context,
+            browser,
+            playwright,
+            skip_frames=skip_frames,
+            cover_frames=cover_frames,
+        )
         context.on("page", surface._adopt_page)
         return surface
 
@@ -162,7 +176,7 @@ class PlaywrightSurface:
 
     async def observe(self) -> Observation:
         self._refs.clear()
-        controls: list[ControlObservation] = []
+        controls = []
         all_text: list[str] = []
         ordinal = 0
         script = """
@@ -215,10 +229,7 @@ class PlaywrightSurface:
         """
         for frame in self.page.frames:
             frame_key = self._frame_key(frame)
-            # The right-hand drawer is an independent test/evidence oracle.
-            # Excluding it prevents both the model and replay from cheating by
-            # reading internal storage-derived data.
-            if frame_key == "night-drawer":
+            if frame_key in self._skip_frames:
                 continue
             try:
                 state = await frame.evaluate(script)
@@ -231,46 +242,13 @@ class PlaywrightSurface:
                 ref = f"c{ordinal}"
                 ordinal += 1
                 self._refs[ref] = (frame, item["domIndex"], item)
-                controls.append(
-                    ControlObservation(
-                        ref=ref,
-                        frame=frame_key,
-                        element_type=item["tag"],
-                        input_type=item["inputType"],
-                        role=item["role"],
-                        accessible_name=item["name"],
-                        has_value=item["hasValue"],
-                        nearby_text=item["nearbyText"],
-                        visible_text=item["visibleText"],
-                        geometry=BoundingBox(**item["box"]),
-                    )
-                )
+                controls.append(control_from_snapshot(ref, frame_key, item))
         visible_text = "\n".join(all_text)
-        digest = hashlib.sha256(
-            json.dumps(
-                {
-                    "text": visible_text,
-                    "controls": [
-                        (
-                            c.frame,
-                            c.element_type,
-                            c.role,
-                            c.has_value,
-                            c.nearby_text,
-                            c.visible_text,
-                        )
-                        for c in controls
-                    ],
-                },
-                sort_keys=True,
-            ).encode()
-        ).hexdigest()[:16]
-        return Observation(
+        return assemble_observation(
             url=self.page.url,
             title=await self.page.title(),
             visible_text=visible_text,
             controls=controls,
-            digest=digest,
         )
 
     def _ref_locator(self, ref: str) -> Locator:
@@ -314,37 +292,7 @@ class PlaywrightSurface:
         except KeyError as exc:
             raise SurfaceResolutionError(f"cannot harvest unknown ref: {ref}") from exc
         frame_key = self._frame_key(frame)
-        nearby = " ".join(item["nearbyText"].split())
-        adjacent = nearby.split("\n", 1)[0][:100] if nearby else None
-        semantic_name = item["name"] or item["visibleText"] or None
-        strategies = [
-            SemanticTarget(
-                frame=frame_key,
-                test_id=item.get("testId"),
-                role=item["role"],
-                name=semantic_name,
-                adjacent_text=adjacent,
-                element_type=item["tag"],
-            ),
-            StructuralTarget(
-                frame=frame_key,
-                table_index=item["tableIndex"],
-                row_index=item["rowIndex"],
-                cell_index=item["cellIndex"],
-                element_type=item["tag"],
-                type_index=item["typeIndex"],
-            ),
-            GeometryTarget(
-                frame=frame_key,
-                anchor_text=adjacent or semantic_name or item["tag"],
-                element_type=item["tag"],
-                expected_box=BoundingBox(**item["box"]),
-            ),
-        ]
-        return TargetBundle(
-            description=nearby or semantic_name or item["tag"],
-            strategies=strategies,
-        )
+        return harvest_target(frame_key, item)
 
     @staticmethod
     def _semantic_locators(frame: Frame, strategy: SemanticTarget) -> list[Locator]:
@@ -460,24 +408,24 @@ class PlaywrightSurface:
         if not found:
             self.last_vote = None
             raise SurfaceResolutionError("; ".join(reasons) or "no strategies resolved")
-        groups: dict[str, list[tuple[str, Locator]]] = {}
-        for kind, locator, identity in found:
-            groups.setdefault(identity, []).append((kind, locator))
-        if len(groups) > 1:
+        try:
+            identity_vote = vote_identities(
+                [(kind, identity) for kind, _, identity in found]
+            )
+        except SurfaceResolutionError:
             self.last_vote = None
-            detail = {
-                identity: [kind for kind, _ in items]
-                for identity, items in groups.items()
-            }
-            raise SurfaceResolutionError(f"locator conflict: {detail}")
-        items = next(iter(groups.values()))
-        winners = [kind for kind, _ in items]
+            raise
+        locator = next(
+            loc
+            for kind, loc, identity in found
+            if identity == identity_vote.identity
+        )
         vote = LocatorVote(
-            locator=items[0][1],
-            winners=winners,
-            agreement=len(winners),
-            weak=len(winners) < 2,
-            identities={kind: identity for kind, _, identity in found},
+            locator=locator,
+            winners=list(identity_vote.winners),
+            agreement=identity_vote.agreement,
+            weak=identity_vote.weak,
+            identities=dict(identity_vote.identities),
         )
         self.last_vote = vote
         return vote
@@ -505,10 +453,9 @@ class PlaywrightSurface:
         raise ValueError(f"unsupported target action: {action}")
 
     async def recover(self, recovery: Recovery) -> bool:
-        observation = await self.observe()
-        if recovery.visible_text not in observation.visible_text:
+        if not await self.checkpoint_visible(recovery.trigger):
             return False
-        if recovery.kind == "dismiss_interstitial" and recovery.action_text:
+        if recovery.strategy == "dismiss" and recovery.action_text:
             for frame in self.page.frames:
                 button = frame.get_by_text(recovery.action_text, exact=True)
                 count = await button.count()
@@ -518,8 +465,9 @@ class PlaywrightSurface:
                         await candidate.click()
                         await self._await_settle()
                         return True
-        if recovery.kind == "retry_once":
-            await asyncio.sleep(3)
+            return False
+        if recovery.strategy == "wait":
+            await asyncio.sleep(recovery.timeout_ms / 1000)
             return True
         return False
 
@@ -583,7 +531,7 @@ class PlaywrightSurface:
         try:
             for frame in self.page.frames:
                 try:
-                    if self._frame_key(frame) == "night-drawer":
+                    if self._frame_key(frame) in self._cover_frames:
                         await frame.evaluate(
                             """() => {
                               const cover = document.createElement('div');
@@ -608,7 +556,7 @@ class PlaywrightSurface:
         finally:
             for frame in self.page.frames:
                 try:
-                    if self._frame_key(frame) == "night-drawer":
+                    if self._frame_key(frame) in self._cover_frames:
                         await frame.evaluate(
                             "() => window.__pigeonholeRestoreDrawer?.()"
                         )

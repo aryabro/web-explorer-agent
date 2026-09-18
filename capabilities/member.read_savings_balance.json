@@ -37,12 +37,24 @@
       {
         "code": "MEMBER_NOT_FOUND",
         "description": "No member jacket exists for the supplied number.",
-        "visible_text": "NO MATCHING MEMBER"
+        "checkpoint": {
+          "id": "outcome-member-not-found",
+          "kind": "visible_text",
+          "expected": "NO MATCHING MEMBER",
+          "frame": "night-work",
+          "timeout_ms": 5000
+        }
       },
       {
         "code": "PERMISSION_DENIED",
         "description": "The signed-in operator cannot access the member jacket.",
-        "visible_text": "PERMISSION DENIED"
+        "checkpoint": {
+          "id": "outcome-permission-denied",
+          "kind": "visible_text",
+          "expected": "PERMISSION DENIED",
+          "frame": "night-work",
+          "timeout_ms": 5000
+        }
       }
     ]
   },
@@ -63,7 +75,7 @@
     "steps": [
       {
         "id": "s1",
-        "intent": "Sign on to the system",
+        "intent": "Enter operator code",
         "action": {
           "type": "type",
           "value": {
@@ -110,7 +122,7 @@
       },
       {
         "id": "s2",
-        "intent": "Enter PIN and sign on",
+        "intent": "Enter the operator PIN into the brass key field",
         "action": {
           "type": "type",
           "value": {
@@ -157,7 +169,7 @@
       },
       {
         "id": "s3",
-        "intent": "Sign on to the system",
+        "intent": "Submit sign-on with operator code and PIN",
         "action": {
           "type": "click"
         },
@@ -203,13 +215,27 @@
         },
         "recover": [
           {
-            "kind": "dismiss_interstitial",
-            "visible_text": "NOTICE FROM RECORDS",
-            "action_text": "Continue lookup"
+            "trigger": {
+              "id": "recover-records-notice",
+              "kind": "visible_text",
+              "expected": "NOTICE FROM RECORDS",
+              "timeout_ms": 5000
+            },
+            "strategy": "dismiss",
+            "action_text": "Continue lookup",
+            "timeout_ms": 2000,
+            "max_attempts": 1
           },
           {
-            "kind": "retry_once",
-            "visible_text": "Index turning..."
+            "trigger": {
+              "id": "recover-index-turning",
+              "kind": "visible_text",
+              "expected": "Index turning...",
+              "timeout_ms": 5000
+            },
+            "strategy": "wait",
+            "timeout_ms": 3000,
+            "max_attempts": 1
           }
         ],
         "risk": "safe",
@@ -217,7 +243,7 @@
       },
       {
         "id": "s4",
-        "intent": "Enter member number and pull pigeonhole",
+        "intent": "Enter the five-digit member number into the Member number field",
         "action": {
           "type": "type",
           "value": {
@@ -264,7 +290,7 @@
       },
       {
         "id": "s5",
-        "intent": "Pull the pigeonhole to retrieve member data",
+        "intent": "Submit member lookup",
         "action": {
           "type": "click"
         },
@@ -310,13 +336,27 @@
         },
         "recover": [
           {
-            "kind": "dismiss_interstitial",
-            "visible_text": "NOTICE FROM RECORDS",
-            "action_text": "Continue lookup"
+            "trigger": {
+              "id": "recover-records-notice",
+              "kind": "visible_text",
+              "expected": "NOTICE FROM RECORDS",
+              "timeout_ms": 5000
+            },
+            "strategy": "dismiss",
+            "action_text": "Continue lookup",
+            "timeout_ms": 2000,
+            "max_attempts": 1
           },
           {
-            "kind": "retry_once",
-            "visible_text": "Index turning..."
+            "trigger": {
+              "id": "recover-index-turning",
+              "kind": "visible_text",
+              "expected": "Index turning...",
+              "timeout_ms": 5000
+            },
+            "strategy": "wait",
+            "timeout_ms": 3000,
+            "max_attempts": 1
           }
         ],
         "risk": "safe",
@@ -324,13 +364,13 @@
       },
       {
         "id": "s6",
-        "intent": "Extract the savings balance from the screen",
+        "intent": "Read the current savings balance from the member jacket",
         "action": {
           "type": "extract",
           "output": "savings_balance"
         },
         "target": {
-          "description": "sensitive output element (value redacted)",
+          "description": "SAVINGS BALANCE READY Current savings balance: $1842.37",
           "strategies": [
             {
               "kind": "structural",
@@ -357,7 +397,13 @@
       {
         "code": "SESSION_EXPIRED",
         "description": "Night Window ended the authenticated session.",
-        "visible_text": "SESSION EXPIRED"
+        "checkpoint": {
+          "id": "fatal-session-expired",
+          "kind": "visible_text",
+          "expected": "SESSION EXPIRED",
+          "frame": "night-work",
+          "timeout_ms": 5000
+        }
       }
     ]
   },
@@ -366,9 +412,9 @@
       "status": "draft"
     },
     "provenance": {
-      "discovered_by": "gemini-3.1-flash-lite",
-      "discovered_at": "2026-09-16T19:58:12.091294Z",
-      "trace_ref": "evidence/discovery-20260916T195717Z-60d257/trace.jsonl",
+      "discovered_by": "z-ai/glm-5.3-flash-20260826",
+      "discovered_at": "2026-09-18T02:06:04.588056Z",
+      "trace_ref": "evidence/discovery-20260918T020425Z-0f25df/trace.jsonl",
       "compiler_version": "pigeonhole-0.1.0"
     }
   }

@@ -212,9 +212,38 @@ class Action(StrictModel):
 
 
 class Recovery(StrictModel):
-    kind: Literal["dismiss_interstitial", "retry_once"]
-    visible_text: str
+    """A bounded reaction to a recoverable runtime condition.
+
+    Distinct from business outcomes (caller-visible results) and fatal states
+    (hard stop / escalate). Trigger copy lives in the capability, not the engine.
+    """
+
+    trigger: Checkpoint
+    strategy: Literal["dismiss", "wait"]
     action_text: str | None = None
+    timeout_ms: int = Field(default=3000, ge=100, le=60000)
+    max_attempts: int = Field(default=1, ge=1, le=5)
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_legacy_kind(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        payload = dict(data)
+        kind = payload.pop("kind", None)
+        visible = payload.pop("visible_text", None)
+        if "trigger" not in payload and visible:
+            payload["trigger"] = {
+                "id": f"recovery-{str(kind or 'trigger').replace('_', '-')}",
+                "kind": "visible_text",
+                "expected": visible,
+            }
+        if "strategy" not in payload:
+            if kind == "dismiss_interstitial":
+                payload["strategy"] = "dismiss"
+            elif kind in {"retry_once", "wait"}:
+                payload["strategy"] = "wait"
+        return payload
 
 
 class Step(StrictModel):
@@ -320,6 +349,7 @@ class SuccessResult(StrictModel):
     completed_steps: list[str]
     llm_calls: Literal[0] = 0
     locator_votes: list[LocatorVoteRecord] = Field(default_factory=list)
+    override_score: float = 0.0
     drift_score: float = 0.0
 
 
@@ -330,6 +360,7 @@ class OutcomeResult(StrictModel):
     completed_steps: list[str]
     llm_calls: Literal[0] = 0
     locator_votes: list[LocatorVoteRecord] = Field(default_factory=list)
+    override_score: float = 0.0
     drift_score: float = 0.0
 
 
@@ -339,6 +370,7 @@ class FailureResult(StrictModel):
     completed_steps: list[str]
     llm_calls: Literal[0] = 0
     locator_votes: list[LocatorVoteRecord] = Field(default_factory=list)
+    override_score: float = 0.0
     drift_score: float = 0.0
 
 
@@ -349,6 +381,7 @@ class EscalatedResult(StrictModel):
     completed_steps: list[str]
     llm_calls: Literal[0] = 0
     locator_votes: list[LocatorVoteRecord] = Field(default_factory=list)
+    override_score: float = 0.0
     drift_score: float = 0.0
 
 

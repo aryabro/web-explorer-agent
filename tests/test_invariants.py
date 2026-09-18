@@ -14,7 +14,7 @@ from pigeonhole.handoff import HandoffCoordinator, SessionLease
 from pigeonhole.policy import PolicyEngine
 from pigeonhole.redact import Redactor
 from pigeonhole.replay import ReplayEngine, load_capability
-from pigeonhole.surface.playwright import PlaywrightSurface
+from target.profile import launch_browser
 
 
 @pytest.fixture
@@ -38,7 +38,7 @@ async def test_locator_disagreement_is_conflict(
     tmp_path: Path, policy: PolicyEngine
 ) -> None:
     capability = load_capability("capabilities/member.read_savings_balance.json")
-    surface = await PlaywrightSurface.launch(headless=True)
+    surface = await launch_browser(headless=True)
     try:
         await surface.act(
             "navigate", value=capability.compatibility.surface.entry_point
@@ -135,7 +135,7 @@ async def test_discover_then_replay_different_member(
         "pin": "1937",
         "member_id": "12345",
     }
-    surface = await PlaywrightSurface.launch(headless=True)
+    surface = await launch_browser(headless=True)
     try:
         result = await DiscoveryLoop(
             surface, ScriptedModel("read"), policy, max_steps=job.max_steps
@@ -153,7 +153,7 @@ async def test_discover_then_replay_different_member(
     finally:
         await surface.close()
 
-    replay_surface = await PlaywrightSurface.launch(headless=True)
+    replay_surface = await launch_browser(headless=True)
     replay_inputs = {**discover_inputs, "member_id": "54321"}
     try:
         evidence = EvidenceWriter(
@@ -188,7 +188,7 @@ async def test_discovery_stuck_persists_intervention(
             return Decision(kind="stuck", reason="cannot progress")
 
     job = Job.load("jobs/read_savings.yaml")
-    surface = await PlaywrightSurface.launch(headless=True)
+    surface = await launch_browser(headless=True)
     coordinator = HandoffCoordinator(surface)
     evidence = EvidenceWriter(
         kind="test-discovery-stuck",

@@ -407,6 +407,30 @@ class DiscoveryLoop:
                     "the visible destination state."
                 )
                 continue
+            if decision.action == "click" and decision.ref and decision.checkpoint_text:
+                clicked = next(
+                    (
+                        control
+                        for control in observation.controls
+                        if control.ref == decision.ref
+                    ),
+                    None,
+                )
+                labels = {
+                    (clicked.visible_text or "").strip(),
+                    (clicked.accessible_name or "").strip(),
+                } if clicked else set()
+                if decision.checkpoint_text.strip() in labels:
+                    feedback = (
+                        "checkpoint_text must describe the destination screen, "
+                        "not the control you just clicked."
+                    )
+                    continue
+            if (
+                decision.risk != Risk.SAFE
+                and decision.risk not in self.confirmed_risks
+            ):
+                decision = decision.model_copy(update={"risk": Risk.SAFE})
 
             policy_decision = self.policy.evaluate(
                 url=observation.url,
@@ -466,8 +490,16 @@ class DiscoveryLoop:
                 extracted = await self.surface.act(
                     decision.action, decision.ref, runtime_value
                 )
-                if checkpoint is not None:
-                    await self.surface.checkpoint(checkpoint)
+                if checkpoint is not None and not await self.surface.checkpoint(
+                    checkpoint
+                ):
+                    feedback = (
+                        "Destination checkpoint was not visible after the action. "
+                        "Use checkpoint_text from the new screen, not the control "
+                        "you clicked."
+                    )
+                    await self.event("action_failed", {"error": feedback})
+                    continue
             except Exception as exc:
                 feedback = f"Action failed: {type(exc).__name__}: {exc}"
                 await self.event("action_failed", {"error": feedback})

@@ -1,6 +1,6 @@
 """Write replay evidence bundles against the committed genuine capability.
 
-Does not overwrite evidence/discovery-20260916T195717Z-60d257.
+Does not overwrite the committed genuine discovery bundle.
 Requires nothing except Chromium; starts Night Window on :8765 if needed.
 """
 
@@ -15,20 +15,21 @@ from pathlib import Path
 import uvicorn
 
 from pigeonhole.catalog import iter_capabilities, summarize, tool_definitions
+from pigeonhole.contracts import Risk
 from pigeonhole.evidence import EvidenceWriter
 from pigeonhole.handoff import HandoffCoordinator
 from pigeonhole.policy import PolicyEngine
 from pigeonhole.redact import Redactor
 from pigeonhole.replay import ReplayEngine, load_capability
-from pigeonhole.surface.playwright import PlaywrightSurface
 from pigeonhole.tenants import apply_tenant, find_profile
+from target.profile import launch_browser
 from target.server import app as night_window
 
 ROOT = Path("evidence")
 POLICY = PolicyEngine.load()
 CAPABILITY = load_capability("capabilities/member.read_savings_balance.json")
 INPUTS = {"operator_id": "teller7", "pin": "1937", "member_id": "12345"}
-GENUINE_DISCOVERY = "discovery-20260916T195717Z-60d257"
+GENUINE_DISCOVERY = "discovery-20260918T020425Z-0f25df"
 
 
 def _ensure_night_window() -> None:
@@ -47,14 +48,19 @@ def _ensure_night_window() -> None:
     raise RuntimeError("Night Window did not start")
 
 
-async def _engine(surface, writer, *, allow_draft=True, handoff=None):
+async def _engine(surface, writer, *, allow_draft=True, allow_mutating=False, handoff=None):
     return ReplayEngine(
         surface=surface,
         policy=POLICY,
         evidence=writer,
         handoff=handoff,
         allow_draft=allow_draft,
+        allow_mutating=allow_mutating,
     )
+
+
+def _needs_mutating(capability) -> bool:
+    return any(step.risk == Risk.MUTATING for step in capability.execution.steps)
 
 
 def _writer(run_id: str, inputs: dict[str, str], extra: list[str] | None = None):
@@ -82,7 +88,7 @@ async def replay_named(
     capability = capability or CAPABILITY
     inputs = inputs or INPUTS
     writer = _writer(run_id, inputs)
-    surface = await PlaywrightSurface.launch(headless=True)
+    surface = await launch_browser(headless=True)
     coordinator = HandoffCoordinator(surface) if handoff else None
     try:
         if fault:
@@ -94,7 +100,11 @@ async def replay_named(
                 fault,
             )
         engine = await _engine(
-            surface, writer, allow_draft=allow_draft, handoff=coordinator
+            surface,
+            writer,
+            allow_draft=allow_draft,
+            allow_mutating=_needs_mutating(capability),
+            handoff=coordinator,
         )
         result = await engine.run(capability, inputs, navigate=not fault)
         print(run_id, result.status, getattr(result, "error", None) or getattr(result, "code", None))
@@ -104,9 +114,14 @@ async def replay_named(
 
 async def replay_handoff(run_id: str = "replay-handoff") -> None:
     writer = _writer(run_id, INPUTS)
-    surface = await PlaywrightSurface.launch(headless=True)
-    coordinator = HandoffCoordinator(surface)
-    engine = await _engine(surface, writer, handoff=coordinator)
+    surface = await launch_browser(headless=True)
+    coordinator = HandoffCoordinator(surface, event_sink=writer.event)
+    engine = await _engine(
+        surface,
+        writer,
+        handoff=coordinator,
+        allow_mutating=_needs_mutating(CAPABILITY),
+    )
     try:
         await surface.act(
             "navigate", value=CAPABILITY.compatibility.surface.entry_point
@@ -114,7 +129,7 @@ async def replay_handoff(run_id: str = "replay-handoff") -> None:
         await surface.page.evaluate(
             "() => sessionStorage.setItem('night-window:fault', 'session_drop')"
         )
-        first = await engine.run(CAPABILITY, INPUTS)
+        first = await engine.run(CAPABILITY, INPUTS, navigate=False)
         assert first.status == "escalated"
         await coordinator.claim(first.intervention_id, "operator-test")
         work = surface.page.frame(name="night-work")
@@ -129,11 +144,8 @@ async def replay_handoff(run_id: str = "replay-handoff") -> None:
         await coordinator.hand_back(
             first.intervention_id, "operator-test", "Restored the member detail view"
         )
-        resume_at = await engine.resume_index(CAPABILITY)
-        final = await engine.run(
-            CAPABILITY, INPUTS, start_index=resume_at, navigate=False
-        )
-        print(run_id, first.status, final.status, resume_at)
+        final = await engine.continue_after_handoff(CAPABILITY, INPUTS)
+        print(run_id, first.status, final.status)
     finally:
         await surface.close()
 

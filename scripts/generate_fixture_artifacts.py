@@ -18,8 +18,8 @@ from pigeonhole.fixture_model import ScriptedModel
 from pigeonhole.policy import PolicyEngine
 from pigeonhole.redact import Redactor
 from pigeonhole.replay import ReplayEngine
-from pigeonhole.surface.playwright import PlaywrightSurface
 from pigeonhole.tenants import apply_tenant, find_profile
+from target.profile import launch_browser
 
 FIXTURE_ROOT = Path("evidence/fixture")
 POLICY = PolicyEngine.load()
@@ -39,7 +39,7 @@ async def discover(
         root=FIXTURE_ROOT,
         run_id=f"{flow}-discovery",
     )
-    surface = await PlaywrightSurface.launch(headless=True)
+    surface = await launch_browser(headless=True)
     try:
         result = await DiscoveryLoop(
             surface,
@@ -93,7 +93,7 @@ async def replay(
         root=FIXTURE_ROOT,
         run_id=name,
     )
-    surface = await PlaywrightSurface.launch(headless=True)
+    surface = await launch_browser(headless=True)
     try:
         await surface.act("navigate", value=job.target)
         await surface.observe()

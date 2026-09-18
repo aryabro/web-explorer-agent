@@ -7,5 +7,6 @@
   "completed_steps": [],
   "llm_calls": 0,
   "locator_votes": [],
+  "override_score": 0.0,
   "drift_score": 0.0
 }

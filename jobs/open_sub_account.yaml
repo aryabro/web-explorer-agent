@@ -63,10 +63,20 @@ fatal_states:
       expected: SESSION EXPIRED
       frame: night-work
 click_recoveries:
-  - kind: dismiss_interstitial
-    visible_text: NOTICE FROM RECORDS
+  - trigger:
+      id: recover-records-notice
+      kind: visible_text
+      expected: NOTICE FROM RECORDS
+    strategy: dismiss
     action_text: Continue lookup
-  - kind: retry_once
-    visible_text: Index turning...
+    timeout_ms: 2000
+    max_attempts: 1
+  - trigger:
+      id: recover-index-turning
+      kind: visible_text
+      expected: Index turning...
+    strategy: wait
+    timeout_ms: 3000
+    max_attempts: 1
 preferred_frame: night-work
 

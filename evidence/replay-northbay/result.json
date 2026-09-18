@@ -23,7 +23,7 @@
       "agreement": 3,
       "weak": false,
       "overridden": true,
-      "drifted": true
+      "drifted": false
     },
     {
       "step_id": "s2",
@@ -35,7 +35,7 @@
       "agreement": 3,
       "weak": false,
       "overridden": true,
-      "drifted": true
+      "drifted": false
     },
     {
       "step_id": "s3",
@@ -47,7 +47,7 @@
       "agreement": 3,
       "weak": false,
       "overridden": true,
-      "drifted": true
+      "drifted": false
     },
     {
       "step_id": "s4",
@@ -71,7 +71,7 @@
       "agreement": 3,
       "weak": false,
       "overridden": true,
-      "drifted": true
+      "drifted": false
     },
     {
       "step_id": "s6",
@@ -84,5 +84,6 @@
       "drifted": false
     }
   ],
-  "drift_score": 0.6667
+  "override_score": 0.6667,
+  "drift_score": 0.0
 }

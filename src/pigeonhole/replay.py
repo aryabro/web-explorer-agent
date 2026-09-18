@@ -22,8 +22,7 @@ from pigeonhole.contracts import (
 )
 from pigeonhole.evidence import EvidenceWriter
 from pigeonhole.policy import PolicyEngine
-from pigeonhole.surface.base import SurfaceDriver
-from pigeonhole.surface.playwright import SurfaceResolutionError
+from pigeonhole.surface.base import SurfaceDriver, SurfaceResolutionError
 
 
 class ReplayEngine:
@@ -110,6 +109,15 @@ class ReplayEngine:
 
         for step in capability.execution.steps[start_index:]:
             observation = await self.surface.observe()
+            await self.evidence.event(
+                "observed",
+                {
+                    "step_id": step.id,
+                    "url": observation.url,
+                    "digest": observation.digest,
+                    "control_count": len(observation.controls),
+                },
+            )
             outcome = await self._detect_outcome(capability)
             if outcome:
                 return await self._outcome(outcome, completed, votes)
@@ -250,10 +258,12 @@ class ReplayEngine:
                     votes,
                 )
         drift = self._drift_score(votes)
+        override = self._override_score(votes)
         result = SuccessResult(
             outputs=outputs,
             completed_steps=completed,
             locator_votes=votes,
+            override_score=override,
             drift_score=drift,
         )
         await self.evidence.event("succeeded", result.model_dump(mode="json"))
@@ -264,9 +274,35 @@ class ReplayEngine:
         """Infer progress from live UI state, never from a stored step counter."""
         for index in range(len(capability.execution.steps) - 1, -1, -1):
             checkpoint = capability.execution.steps[index].checkpoint
-            if checkpoint and await self.surface.checkpoint(checkpoint):
+            if checkpoint and await self.surface.checkpoint_visible(checkpoint):
                 return index + 1
         return 0
+
+    async def continue_after_handoff(
+        self,
+        capability: Capability,
+        inputs: dict[str, Any],
+    ) -> ReplayResult:
+        """Resume after an operator returns the live session.
+
+        Progress is derived from visible checkpoints on the current page, not
+        from EscalatedResult.completed_steps or any stored cursor.
+        """
+        if self.handoff is None:
+            raise RuntimeError("cannot resume without a handoff coordinator")
+        await self.handoff.lease.assert_automation()
+        start_index = await self.resume_index(capability)
+        await self.evidence.event(
+            "resumed",
+            {
+                "resume_index": start_index,
+                "basis": "live checkpoints",
+                "holder": "automation",
+            },
+        )
+        return await self.run(
+            capability, inputs, start_index=start_index, navigate=False
+        )
 
     async def _settle_step(
         self,
@@ -279,7 +315,7 @@ class ReplayEngine:
         """Wait for the step checkpoint without missing a declared outcome."""
         timeout_ms = step.checkpoint.timeout_ms if step.checkpoint else 0
         deadline = asyncio.get_running_loop().time() + timeout_ms / 1000
-        recovered = False
+        attempts = [0] * len(step.recover)
         while True:
             await self.surface.observe()
             outcome = await self._detect_outcome(capability)
@@ -302,23 +338,33 @@ class ReplayEngine:
                     {"step_id": step.id, "checkpoint_id": step.checkpoint.id},
                 )
                 return None
-            timed_out = asyncio.get_running_loop().time() >= deadline
-            if timed_out and not recovered:
-                for recovery in step.recover:
-                    if await self.surface.recover(recovery):
-                        await self.evidence.event(
-                            "recovery",
-                            {"step_id": step.id, "kind": recovery.kind},
-                        )
-                        recovered = True
-                        deadline = (
-                            asyncio.get_running_loop().time()
-                            + step.checkpoint.timeout_ms / 1000
-                        )
-                        break
-                if recovered:
+            recovered = False
+            for index, recovery in enumerate(step.recover):
+                if attempts[index] >= recovery.max_attempts:
                     continue
-            if timed_out:
+                if not await self.surface.checkpoint_visible(recovery.trigger):
+                    continue
+                if await self.surface.recover(recovery):
+                    attempts[index] += 1
+                    recovered = True
+                    await self.evidence.event(
+                        "recovery",
+                        {
+                            "step_id": step.id,
+                            "strategy": recovery.strategy,
+                            "attempt": attempts[index],
+                            "max_attempts": recovery.max_attempts,
+                            "trigger": recovery.trigger.expected,
+                        },
+                    )
+                    deadline = (
+                        asyncio.get_running_loop().time()
+                        + max(step.checkpoint.timeout_ms, recovery.timeout_ms) / 1000
+                    )
+                    break
+            if recovered:
+                continue
+            if asyncio.get_running_loop().time() >= deadline:
                 break
             await asyncio.sleep(0.1)
         observed = (await self.surface.observe()).visible_text[-1000:]
@@ -355,7 +401,11 @@ class ReplayEngine:
             strategy.kind == "semantic"
             for strategy in (step.target.strategies if step.target else [])
         )
-        drifted = overridden or (had_semantic and "semantic" not in vote.winners)
+        drifted = (
+            not overridden
+            and had_semantic
+            and "semantic" not in vote.winners
+        )
         return LocatorVoteRecord(
             step_id=step.id,
             winners=list(vote.winners),
@@ -366,10 +416,18 @@ class ReplayEngine:
         )
 
     @staticmethod
-    def _drift_score(votes: list[LocatorVoteRecord]) -> float:
+    def _score(votes: list[LocatorVoteRecord], attr: str) -> float:
         if not votes:
             return 0.0
-        return round(sum(1 for vote in votes if vote.drifted) / len(votes), 4)
+        return round(sum(1 for vote in votes if getattr(vote, attr)) / len(votes), 4)
+
+    @classmethod
+    def _drift_score(cls, votes: list[LocatorVoteRecord]) -> float:
+        return cls._score(votes, "drifted")
+
+    @classmethod
+    def _override_score(cls, votes: list[LocatorVoteRecord]) -> float:
+        return cls._score(votes, "overridden")
 
     async def _outcome(
         self,
@@ -382,6 +440,7 @@ class ReplayEngine:
             message=outcome.description,
             completed_steps=completed,
             locator_votes=votes,
+            override_score=self._override_score(votes),
             drift_score=self._drift_score(votes),
         )
         await self.evidence.event("business_outcome", result.model_dump(mode="json"))
@@ -410,7 +469,7 @@ class ReplayEngine:
     @staticmethod
     def _action_failure_code(exc: Exception) -> FailureCode:
         if isinstance(exc, SurfaceResolutionError):
-            if "locator conflict" in str(exc).lower():
+            if exc.conflict:
                 return FailureCode.LOCATOR_CONFLICT
             return FailureCode.LOCATOR_UNRESOLVED
         return FailureCode.ACTION_FAILED
@@ -436,6 +495,7 @@ class ReplayEngine:
             error=diagnostic,
             completed_steps=completed,
             locator_votes=votes,
+            override_score=self._override_score(votes),
             drift_score=self._drift_score(votes),
         )
         await self.evidence.event("failed", result.model_dump(mode="json"))
@@ -457,6 +517,14 @@ class ReplayEngine:
         if self.handoff is None:
             return await self._failure(diagnostic, completed, inputs, votes)
         await self.surface.pause()
+        await self.evidence.event(
+            "lease_ceded",
+            {
+                "holder": None,
+                "step_id": diagnostic.step_id,
+                "code": diagnostic.code,
+            },
+        )
         intervention = await self.handoff.raise_intervention(
             capability_id=capability.contract.id,
             goal=capability.contract.description,
@@ -465,12 +533,14 @@ class ReplayEngine:
             ),
             evidence_directory=self.evidence.directory,
             redact_values=[str(value) for value in inputs.values()],
+            step_id=diagnostic.step_id,
         )
         result = EscalatedResult(
             intervention_id=intervention.id,
             reason=diagnostic,
             completed_steps=completed,
             locator_votes=votes,
+            override_score=self._override_score(votes),
             drift_score=self._drift_score(votes),
         )
         await self.evidence.event("escalated", result.model_dump(mode="json"))

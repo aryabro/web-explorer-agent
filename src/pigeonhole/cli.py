@@ -21,8 +21,8 @@ from pigeonhole.handoff import HandoffCoordinator
 from pigeonhole.policy import PolicyEngine
 from pigeonhole.redact import Redactor
 from pigeonhole.replay import ReplayEngine, load_capability
-from pigeonhole.surface.playwright import PlaywrightSurface
 from pigeonhole.tenants import apply_tenant, find_profile
+from target.profile import launch_browser
 
 app = typer.Typer(no_args_is_help=True, help="Pigeonhole computer-use automation")
 
@@ -98,8 +98,8 @@ async def _discover(
         model=model.name,
         redactor=redactor,
     )
-    surface = await PlaywrightSurface.launch(headless=headless)
-    coordinator = HandoffCoordinator(surface)
+    surface = await launch_browser(headless=headless)
+    coordinator = HandoffCoordinator(surface, event_sink=evidence.event)
 
     async def on_intervention(intervention) -> bool:
         if headless:
@@ -233,8 +233,8 @@ async def _replay(
         model=None,
         redactor=redactor,
     )
-    surface = await PlaywrightSurface.launch(headless=headless)
-    coordinator = HandoffCoordinator(surface) if handoff_enabled else None
+    surface = await launch_browser(headless=headless)
+    coordinator = HandoffCoordinator(surface, event_sink=evidence.event) if handoff_enabled else None
     try:
         if fault:
             await surface.act(
@@ -255,14 +255,7 @@ async def _replay(
         result = await engine.run(capability, inputs, navigate=not fault)
         if result.status == "escalated" and coordinator and not headless:
             await _headed_return(coordinator, result.intervention_id)
-            start_index = await engine.resume_index(capability)
-            await evidence.event(
-                "resumed",
-                {"resume_index": start_index, "basis": "live checkpoints"},
-            )
-            result = await engine.run(
-                capability, inputs, start_index=start_index, navigate=False
-            )
+            result = await engine.continue_after_handoff(capability, inputs)
         typer.echo(json.dumps(result.model_dump(mode="json"), indent=2))
         typer.echo(f"evidence: {evidence.directory}")
     finally:
@@ -307,7 +300,7 @@ def show_storage(
 
 
 async def _show_storage(headless: bool) -> None:
-    surface = await PlaywrightSurface.launch(headless=headless)
+    surface = await launch_browser(headless=headless)
     try:
         await surface.act(
             "navigate",
