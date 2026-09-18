@@ -5,15 +5,19 @@
   <script src="/static/app.js"></script>
 </head>
 <body>
-  <div class="mast">NIGHT<br>WINDOW<br><span class="dim">v4.1 NB</span></div>
-  <div class="panel">
-    <p><b>JACKETS</b></p>
+  <div class="brand">TEST BANK<span>North Branch</span></div>
+  <div class="nav-section">
+    <p class="nav-heading">MEMBER SERVICES</p>
     <p><a href="/tenant-b/search.html" target="night-work">Member Search</a></p>
-    <p><a href="/tenant-b/signin.html" target="night-work">Sign On</a></p>
-    <hr>
-    <p><a href="#" id="exit-link">End Window</a></p>
+    <p class="nav-disabled">Account Maintenance</p>
+    <p class="nav-disabled">Service Requests</p>
   </div>
-  <p class="dim">North Bay<br>Local terminal</p>
+  <div class="nav-section">
+    <p class="nav-heading">SESSION</p>
+    <p><a href="/tenant-b/signin.html" target="night-work">Sign In</a></p>
+    <p><a href="#" id="exit-link">Sign Out</a></p>
+  </div>
+  <div class="terminal-status"><span class="status-dot"></span> Training environment<br>North workstation</div>
   <script>
     document.getElementById("exit-link").onclick = function (event) {
       event.preventDefault();

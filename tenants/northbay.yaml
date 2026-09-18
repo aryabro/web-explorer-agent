@@ -1,21 +1,24 @@
 tenant: northbay
 entry_point: http://127.0.0.1:8765/tenant-b/
+vendor: north-bay-credit-union
+version_range: "4.x"
+product_version: "4.1"
 overrides:
   targets:
     s1:
-      adjacent_text: Teller ID
-      description: Teller ID
+      adjacent_text: Staff ID
+      description: Staff ID
     s2:
-      adjacent_text: Access PIN
-      description: Access PIN
+      adjacent_text: Access code
+      description: Access code
     s3:
-      name: Unlock console
-      adjacent_text: Unlock console
-      description: Unlock console
+      name: Continue
+      adjacent_text: Continue
+      description: Continue
     s5:
-      name: Open jacket
-      adjacent_text: Open jacket
-      description: Open jacket
+      name: View profile
+      adjacent_text: View profile
+      description: View profile
   checkpoints:
     cp3:
-      expected: MEMBER JACKET
+      expected: Member search

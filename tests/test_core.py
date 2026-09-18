@@ -48,26 +48,26 @@ class ScriptedLookupModel:
         if self.turn == 0:
             decision = Decision(
                 kind="act",
-                intent="Enter the runtime operator identifier",
+                intent="Enter the runtime employee identifier",
                 action="type",
-                ref=ref("Operator code", element_type="input"),
+                ref=ref("Employee ID", element_type="input"),
                 input_name="operator_id",
             )
         elif self.turn == 1:
             decision = Decision(
                 kind="act",
-                intent="Enter the runtime-only brass key",
+                intent="Enter the runtime-only security PIN",
                 action="type",
-                ref=ref("Brass key", element_type="input"),
+                ref=ref("Security PIN", element_type="input"),
                 input_name="pin",
             )
         elif self.turn == 2:
             decision = Decision(
                 kind="act",
-                intent="Sign on to Night Window",
+                intent="Sign in to the test bank console",
                 action="click",
-                ref=ref("Turn the key", element_type="button"),
-                checkpoint_text="MEMBER PIGEONHOLE",
+                ref=ref("Sign in", element_type="button"),
+                checkpoint_text="Member search",
             )
         elif self.turn == 3:
             decision = Decision(
@@ -80,17 +80,17 @@ class ScriptedLookupModel:
         elif self.turn == 4:
             decision = Decision(
                 kind="act",
-                intent="Open the matching member jacket",
+                intent="Open the matching member profile",
                 action="click",
-                ref=ref("Pull pigeonhole", element_type="button"),
-                checkpoint_text="SAVINGS BALANCE READY",
+                ref=ref("Search members", element_type="button"),
+                checkpoint_text="MEMBER PROFILE READY",
             )
         elif self.turn == 5:
             decision = Decision(
                 kind="act",
                 intent="Read the visible current savings balance",
                 action="extract",
-                ref=ref("$", element_type="strong"),
+                ref=ref("Current savings", element_type="strong"),
                 output="savings_balance",
             )
         else:
@@ -282,6 +282,13 @@ async def test_discovery_compile_and_replay_real_ui(
         assert "1937" not in serialized
         assert "value redacted" not in serialized.lower()
         assert len(capability.execution.steps[0].target.strategies) == 3
+        postcondition = capability.execution.success.checkpoint_ids[-1]
+        assert any(
+            step.checkpoint and step.checkpoint.id == postcondition
+            and step.checkpoint.role == "postcondition"
+            for step in capability.execution.steps
+        )
+        assert capability.compatibility.fingerprint
     finally:
         await discovery_surface.close()
 
@@ -484,8 +491,8 @@ async def test_same_session_handoff_and_checkpoint_resume(
         await work.locator("button").click()
         await work.wait_for_url("**/search.html")
         await work.locator("input").first.fill("12345")
-        await work.get_by_text("Pull pigeonhole", exact=True).click()
-        await work.get_by_text("SAVINGS BALANCE READY").wait_for()
+        await work.get_by_text("Search members", exact=True).click()
+        await work.get_by_text("MEMBER PROFILE READY").wait_for()
         await coordinator.hand_back(
             first.intervention_id, "operator-test", "Restored the member detail view"
         )
@@ -512,10 +519,12 @@ def test_tenant_profile_patches_semantic_labels() -> None:
     specialized = apply_tenant(capability, find_profile("northbay"))
     assert specialized.compatibility.tenant == "northbay"
     assert specialized.compatibility.surface.entry_point.endswith("/tenant-b/")
+    assert specialized.compatibility.surface.vendor == "north-bay-credit-union"
+    assert "tenant-b" in (specialized.compatibility.fingerprint or "")
     s1 = specialized.execution.steps[0].target.strategies[0]
     assert s1.kind == "semantic"
-    assert s1.adjacent_text == "Teller ID"
-    assert specialized.execution.steps[2].checkpoint.expected == "MEMBER JACKET"
+    assert s1.adjacent_text == "Staff ID"
+    assert specialized.execution.steps[2].checkpoint.expected == "Member search"
 
 
 @pytest.mark.asyncio
@@ -612,4 +621,3 @@ async def test_northbay_override_replays_and_bare_tenant_drifts(
         assert replay.status in {"failure", "escalated"}
     finally:
         await surface.close()
-

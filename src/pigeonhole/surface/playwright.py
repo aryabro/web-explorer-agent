@@ -8,7 +8,14 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from playwright.async_api import Browser, BrowserContext, Frame, Locator, Page, async_playwright
+from playwright.async_api import (
+    Browser,
+    BrowserContext,
+    Frame,
+    Locator,
+    Page,
+    async_playwright,
+)
 
 from pigeonhole.contracts import (
     Checkpoint,
@@ -18,8 +25,16 @@ from pigeonhole.contracts import (
     StructuralTarget,
     TargetBundle,
 )
-from pigeonhole.surface.base import Observation, SurfaceResolutionError
-from pigeonhole.surface.perception import assemble_observation, control_from_snapshot, harvest_target
+from pigeonhole.surface.base import (
+    FrameObservation,
+    Observation,
+    SurfaceResolutionError,
+)
+from pigeonhole.surface.perception import (
+    assemble_observation,
+    control_from_snapshot,
+    harvest_target,
+)
 from pigeonhole.surface.resolution import vote_identities
 
 
@@ -52,6 +67,7 @@ class PlaywrightSurface:
         self._skip_frames = frozenset(skip_frames)
         self._cover_frames = frozenset(cover_frames)
         self._refs: dict[str, tuple[Frame, int, dict[str, Any]]] = {}
+        self._observation_sequence = 0
         self._paused = asyncio.Event()
         self._paused.set()
         self.last_vote: LocatorVote | None = None
@@ -140,7 +156,7 @@ class PlaywrightSurface:
                       if (!body || !(body.innerText || '').trim()) return false;
                       return Boolean(
                         body.querySelector(
-                          'input,select,button,a,[role="button"],[role="textbox"],[role="combobox"]'
+                          'input,textarea,select,button,a,[role="button"],[role="textbox"],[role="combobox"]'
                         )
                       );
                     }"""
@@ -176,18 +192,25 @@ class PlaywrightSurface:
 
     async def observe(self) -> Observation:
         self._refs.clear()
+        self._observation_sequence += 1
+        observation_id = f"o{self._observation_sequence}"
         controls = []
+        frames: list[FrameObservation] = []
         all_text: list[str] = []
+        dialogs: list[str] = []
+        alerts: list[str] = []
+        busy = False
+        truncated = False
         ordinal = 0
         script = """
         () => {
-          const candidates = [...document.querySelectorAll('input,select,button,a,strong,span')];
+          const candidates = [...document.querySelectorAll('input,textarea,select,button,a,strong,span')];
           const visible = el => {
             const s = getComputedStyle(el), r = el.getBoundingClientRect();
             return s.visibility !== 'hidden' && s.display !== 'none' && r.width > 0 && r.height > 0;
           };
           const role = el => el.getAttribute('role') || ({
-            BUTTON: 'button', A: 'link', SELECT: 'combobox'
+            BUTTON: 'button', A: 'link', SELECT: 'combobox', TEXTAREA: 'textbox'
           }[el.tagName] || (el.tagName === 'INPUT'
             ? (['button','submit'].includes(el.type) ? 'button' : 'textbox') : null));
           const name = el => el.getAttribute('aria-label') ||
@@ -197,6 +220,12 @@ class PlaywrightSurface:
             el.getAttribute('data-testid') || el.getAttribute('data-test-id') || null;
           return {
             bodyText: document.body?.innerText || '',
+            candidateCount: candidates.length,
+            dialogs: [...document.querySelectorAll('dialog[open],[role="dialog"]')]
+              .filter(visible).map(el => (el.innerText || '').trim().slice(0, 500)).slice(0, 5),
+            alerts: [...document.querySelectorAll('[role="alert"]')]
+              .filter(visible).map(el => (el.innerText || '').trim().slice(0, 500)).slice(0, 5),
+            busy: Boolean(document.querySelector('[aria-busy="true"]')),
             controls: candidates.map((el, domIndex) => {
               if (!visible(el)) return null;
               const r = el.getBoundingClientRect();
@@ -215,6 +244,13 @@ class PlaywrightSurface:
                 name: name(el),
                 testId: testId(el),
                 hasValue: Boolean(el.value),
+                interactive: ['INPUT','TEXTAREA','SELECT','BUTTON','A'].includes(el.tagName) ||
+                  ['button','textbox','combobox','checkbox','radio','link'].includes(role(el)),
+                disabled: Boolean(el.disabled) || el.getAttribute('aria-disabled') === 'true',
+                checked: ['checkbox','radio'].includes(el.type) ? Boolean(el.checked) : null,
+                required: Boolean(el.required) || el.getAttribute('aria-required') === 'true',
+                readOnly: Boolean(el.readOnly),
+                expanded: el.hasAttribute('aria-expanded') ? el.getAttribute('aria-expanded') === 'true' : null,
                 visibleText: (el.tagName === 'INPUT' ? '' : (el.innerText || el.value || '')).trim(),
                 nearbyText: (tr?.innerText || el.parentElement?.innerText || '').trim().slice(0, 240),
                 box: {x:r.x,y:r.y,width:r.width,height:r.height},
@@ -223,7 +259,7 @@ class PlaywrightSurface:
                 cellIndex: cell ? cells.indexOf(cell) : null,
                 typeIndex: same.indexOf(el)
               };
-            }).filter(Boolean)
+            }).filter(Boolean).slice(0, 160)
           };
         }
         """
@@ -235,32 +271,54 @@ class PlaywrightSurface:
                 state = await frame.evaluate(script)
             except Exception:
                 continue
-            body_text = " ".join(state["bodyText"].split())
+            normalized_text = " ".join(state["bodyText"].split())
+            body_text = normalized_text[:12000]
+            truncated = truncated or len(normalized_text) > len(body_text)
+            truncated = truncated or state["candidateCount"] > len(state["controls"])
+            dialogs.extend(f"[{frame_key}] {text}" for text in state["dialogs"] if text)
+            alerts.extend(f"[{frame_key}] {text}" for text in state["alerts"] if text)
+            busy = busy or bool(state["busy"])
             if body_text:
                 all_text.append(f"[{frame_key}] {body_text}")
+            frame_refs: list[str] = []
             for item in state["controls"]:
-                ref = f"c{ordinal}"
+                ref = f"{observation_id}:c{ordinal}"
                 ordinal += 1
                 self._refs[ref] = (frame, item["domIndex"], item)
+                frame_refs.append(ref)
                 controls.append(control_from_snapshot(ref, frame_key, item))
+            frames.append(
+                FrameObservation(
+                    key=frame_key,
+                    url=frame.url,
+                    visible_text=body_text,
+                    control_refs=frame_refs,
+                )
+            )
         visible_text = "\n".join(all_text)
         return assemble_observation(
+            observation_id=observation_id,
             url=self.page.url,
             title=await self.page.title(),
             visible_text=visible_text,
             controls=controls,
+            frames=frames,
+            dialogs=dialogs,
+            alerts=alerts,
+            busy=busy,
+            truncated=truncated,
         )
 
     def _ref_locator(self, ref: str) -> Locator:
         try:
             frame, index, _ = self._refs[ref]
         except KeyError as exc:
-            raise SurfaceResolutionError(f"observation ref expired or unknown: {ref}") from exc
-        return frame.locator("input,select,button,a,strong,span").nth(index)
+            raise SurfaceResolutionError(
+                f"observation ref expired or unknown: {ref}"
+            ) from exc
+        return frame.locator("input,textarea,select,button,a,strong,span").nth(index)
 
-    async def act(
-        self, action: str, ref: str | None = None, value: Any = None
-    ) -> Any:
+    async def act(self, action: str, ref: str | None = None, value: Any = None) -> Any:
         await self._paused.wait()
         if action == "navigate":
             await self.page.goto(str(value), wait_until="load")
@@ -339,7 +397,9 @@ class PlaywrightSurface:
             return None
 
     async def _resolve_strategy(
-        self, strategy: SemanticTarget | StructuralTarget | GeometryTarget, reasons: list[str]
+        self,
+        strategy: SemanticTarget | StructuralTarget | GeometryTarget,
+        reasons: list[str],
     ) -> Locator | None:
         frame = self._find_frame(strategy.frame)
         if frame is None:
@@ -416,9 +476,7 @@ class PlaywrightSurface:
             self.last_vote = None
             raise
         locator = next(
-            loc
-            for kind, loc, identity in found
-            if identity == identity_vote.identity
+            loc for kind, loc, identity in found if identity == identity_vote.identity
         )
         vote = LocatorVote(
             locator=locator,
@@ -561,9 +619,7 @@ class PlaywrightSurface:
                             "() => window.__pigeonholeRestoreDrawer?.()"
                         )
                     else:
-                        await frame.evaluate(
-                            "() => window.__pigeonholeRestore?.()"
-                        )
+                        await frame.evaluate("() => window.__pigeonholeRestore?.()")
                 except Exception:
                     pass
 
@@ -626,4 +682,3 @@ class PlaywrightSurface:
             }"""
         )
         return rows
-

@@ -1,12 +1,14 @@
 # Evidence
 
 `discovery-20260916T195717Z-60d257/` is the genuine Gemini discovery run
-(`gemini-3.1-flash-lite`). It completed the live UI goal and compiled
-`capabilities/member.read_savings_balance.json`. Do not treat later scripted
-tests as a replacement for this folder.
+(`gemini-3.1-flash-lite`). It completed the live UI goal against Night Window's
+frameset/table console. That folder is submission evidence; scripted pytest
+models are not a replacement for it. Commit it with the repository.
 
-Replay bundles below were produced against that compiled artifact with
-`llm_calls: 0`:
+`capabilities/member.read_savings_balance.json` is the compiled artifact from a
+later genuine GLM compile (`discovery-20260918T020425Z-0f25df`), with trusted
+risk inference (sign-on is `safe`; checkpoints are destination text). Replay
+bundles below were produced against that artifact with `llm_calls: 0`.
 
 - `replay-happy-12345/` — member `12345` success
 - `replay-member-not-found/` — `member_id=00000` → outcome `MEMBER_NOT_FOUND`

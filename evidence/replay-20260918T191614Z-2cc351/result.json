@@ -1,0 +1,55 @@
+{
+  "status": "escalated",
+  "intervention_id": "4ff11c66c042",
+  "reason": {
+    "step_id": "s4",
+    "code": "LOCATOR_UNRESOLVED",
+    "message": "SurfaceResolutionError: structural: ambiguous or hidden",
+    "expected": "Read the current savings balance from the member jacket"
+  },
+  "completed_steps": [
+    "s1",
+    "s2",
+    "s3"
+  ],
+  "llm_calls": 0,
+  "locator_votes": [
+    {
+      "step_id": "s1",
+      "winners": [
+        "semantic",
+        "structural",
+        "geometry"
+      ],
+      "agreement": 3,
+      "weak": false,
+      "overridden": false,
+      "drifted": false
+    },
+    {
+      "step_id": "s2",
+      "winners": [
+        "semantic",
+        "structural",
+        "geometry"
+      ],
+      "agreement": 3,
+      "weak": false,
+      "overridden": false,
+      "drifted": false
+    },
+    {
+      "step_id": "s3",
+      "winners": [
+        "structural",
+        "geometry"
+      ],
+      "agreement": 2,
+      "weak": false,
+      "overridden": false,
+      "drifted": true
+    }
+  ],
+  "override_score": 0.0,
+  "drift_score": 0.3333
+}

@@ -10,7 +10,8 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 ROOT = Path(__file__).parent / "static"
-app = FastAPI(title="Night Window 4.1", docs_url=None, redoc_url=None)
+SHARED_TENANT_PAGES = {"open-account", "confirm-account", "created-account"}
+app = FastAPI(title="Test Bank Operations", docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=ROOT), name="static")
 
 
@@ -28,7 +29,11 @@ def tenant_b_index() -> FileResponse:
 def tenant_b_page(page: str) -> FileResponse:
     candidate = (ROOT / "tenant-b" / f"{page}.html").resolve()
     tenant_root = (ROOT / "tenant-b").resolve()
-    if candidate.parent != tenant_root or not candidate.exists():
+    if candidate.parent != tenant_root:
+        return FileResponse(ROOT / "not-found.html", status_code=404)
+    if not candidate.exists() and page in SHARED_TENANT_PAGES:
+        return FileResponse(ROOT / f"{page}.html")
+    if not candidate.exists():
         return FileResponse(ROOT / "not-found.html", status_code=404)
     return FileResponse(candidate)
 
@@ -58,4 +63,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

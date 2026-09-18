@@ -12,8 +12,14 @@ class Redactor:
             reverse=True,
         )
         self.patterns = [
-            re.compile(r"(?i)Member name\s+.+?\s+Jacket status"),
-            re.compile(r"\bS-\d{4}\s+Savings\s+.+?(?=\s+\$)"),
+            re.compile(
+                r"(?i)(Member name\s+).+?(?=\s+(?:Member|Profile|Jacket) status)"
+            ),
+            re.compile(
+                r"(?i)(Member profile\s+)[A-Z][A-Za-z'-]+(?:\s+[A-Z][A-Za-z'-]+)+"
+                r"(?=\s+Member\b)"
+            ),
+            re.compile(r"\b(?:S|C)-\d{4}\s+(?:Savings|Checking)\s+.+?(?=\s+\$)"),
             re.compile(r"\b[A-Z]-\d{4,}\b"),
             # A digit run directly after a decimal point is a fraction, not an
             # identifier; without this, timestamp microseconds are redacted.
@@ -41,3 +47,6 @@ class Redactor:
             return tuple(self.data(item) for item in value)
         return value
 
+    def for_model(self, value: Any) -> Any:
+        """Redact a prompt payload before it leaves the process toward an LLM."""
+        return self.data(value)

@@ -37,6 +37,7 @@ class FailureCode(StrEnum):
     SUCCESS_CONDITION_FAILED = "SUCCESS_CONDITION_FAILED"
     ACTION_FAILED = "ACTION_FAILED"
     APPROVAL_REQUIRED = "APPROVAL_REQUIRED"
+    COMPATIBILITY_MISMATCH = "COMPATIBILITY_MISMATCH"
 
 
 class Parameter(StrictModel):
@@ -52,6 +53,7 @@ class Checkpoint(StrictModel):
     expected: str
     frame: str | None = None
     timeout_ms: int = Field(default=5000, ge=100, le=60000)
+    role: Literal["intermediate", "postcondition"] = "intermediate"
 
 
 def _checkpoint_from_visible(code: str, visible: str) -> dict[str, Any]:
@@ -117,6 +119,8 @@ class SurfaceCompatibility(StrictModel):
     product: str
     product_version: str
     entry_point: str
+    vendor: str | None = None
+    version_range: str | None = None
 
 
 class TargetOverride(StrictModel):
@@ -139,6 +143,7 @@ class Compatibility(StrictModel):
     surface: SurfaceCompatibility
     tenant: str | None = None
     tenant_overrides: TenantOverrides = Field(default_factory=TenantOverrides)
+    fingerprint: str | None = None
 
 
 class BoundingBox(StrictModel):
@@ -204,9 +209,7 @@ ValueSource = Annotated[InputValue | LiteralValue, Field(discriminator="source")
 
 
 class Action(StrictModel):
-    type: Literal[
-        "navigate", "click", "type", "select", "extract", "wait", "dismiss"
-    ]
+    type: Literal["navigate", "click", "type", "select", "extract", "wait", "dismiss"]
     value: ValueSource | None = None
     output: str | None = None
 
@@ -311,7 +314,9 @@ class Capability(StrictModel):
         }
         missing_checkpoints = set(self.execution.success.checkpoint_ids) - checkpoints
         if missing_checkpoints:
-            raise ValueError(f"unknown success checkpoints: {sorted(missing_checkpoints)}")
+            raise ValueError(
+                f"unknown success checkpoints: {sorted(missing_checkpoints)}"
+            )
         missing_outputs = set(self.execution.success.required_outputs) - set(
             self.contract.outputs
         )
@@ -320,9 +325,13 @@ class Capability(StrictModel):
         for step in self.execution.steps:
             value = step.action.value
             if isinstance(value, InputValue) and value.name not in self.contract.inputs:
-                raise ValueError(f"step {step.id} references unknown input {value.name}")
+                raise ValueError(
+                    f"step {step.id} references unknown input {value.name}"
+                )
             if step.action.output and step.action.output not in self.contract.outputs:
-                raise ValueError(f"step {step.id} writes unknown output {step.action.output}")
+                raise ValueError(
+                    f"step {step.id} writes unknown output {step.action.output}"
+                )
         return self
 
 
@@ -389,4 +398,3 @@ ReplayResult = Annotated[
     SuccessResult | OutcomeResult | FailureResult | EscalatedResult,
     Field(discriminator="status"),
 ]
-

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import UTC, datetime
 from typing import Any
 
 from pigeonhole.contracts import (
@@ -16,7 +17,7 @@ from pigeonhole.contracts import (
     StructuralTarget,
     TargetBundle,
 )
-from pigeonhole.surface.base import ControlObservation, Observation
+from pigeonhole.surface.base import ControlObservation, FrameObservation, Observation
 
 
 def control_from_snapshot(
@@ -30,6 +31,12 @@ def control_from_snapshot(
         role=item.get("role"),
         accessible_name=item.get("name"),
         has_value=bool(item.get("hasValue")),
+        interactive=bool(item.get("interactive", True)),
+        disabled=bool(item.get("disabled")),
+        checked=item.get("checked"),
+        required=bool(item.get("required")),
+        read_only=bool(item.get("readOnly")),
+        expanded=item.get("expanded"),
         nearby_text=item.get("nearbyText") or "",
         visible_text=item.get("visibleText") or "",
         geometry=BoundingBox(**item["box"]),
@@ -51,9 +58,7 @@ def observation_digest(visible_text: str, controls: list[ControlObservation]) ->
             for control in controls
         ],
     }
-    return hashlib.sha256(
-        json.dumps(payload, sort_keys=True).encode()
-    ).hexdigest()[:16]
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
 
 
 def assemble_observation(
@@ -62,12 +67,25 @@ def assemble_observation(
     title: str,
     visible_text: str,
     controls: list[ControlObservation],
+    observation_id: str = "legacy",
+    frames: list[FrameObservation] | None = None,
+    dialogs: list[str] | None = None,
+    alerts: list[str] | None = None,
+    busy: bool = False,
+    truncated: bool = False,
 ) -> Observation:
     return Observation(
+        observation_id=observation_id,
+        captured_at=datetime.now(UTC).isoformat(),
         url=url,
         title=title,
         visible_text=visible_text,
         controls=controls,
+        frames=frames or [],
+        dialogs=dialogs or [],
+        alerts=alerts or [],
+        busy=busy,
+        truncated=truncated,
         digest=observation_digest(visible_text, controls),
     )
 

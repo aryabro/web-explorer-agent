@@ -37,28 +37,28 @@ class ScriptedModel:
         common = [
             Decision(
                 kind="act",
-                intent="Enter the runtime operator identifier",
+                intent="Enter the runtime employee identifier",
                 action="type",
-                ref=ref("Operator code", "input"),
+                ref=ref("Employee ID", "input"),
                 input_name="operator_id",
             )
             if self.turn == 0
             else None,
             Decision(
                 kind="act",
-                intent="Enter the runtime-only brass key",
+                intent="Enter the runtime-only security PIN",
                 action="type",
-                ref=ref("Brass key", "input"),
+                ref=ref("Security PIN", "input"),
                 input_name="pin",
             )
             if self.turn == 1
             else None,
             Decision(
                 kind="act",
-                intent="Sign on to Night Window",
+                intent="Sign in to the test bank console",
                 action="click",
-                ref=ref("Turn the key", "button"),
-                checkpoint_text="MEMBER PIGEONHOLE",
+                ref=ref("Sign in", "button"),
+                checkpoint_text="Member search",
             )
             if self.turn == 2
             else None,
@@ -73,10 +73,10 @@ class ScriptedModel:
             else None,
             Decision(
                 kind="act",
-                intent="Open the matching member jacket",
+                intent="Open the matching member profile",
                 action="click",
-                ref=ref("Pull pigeonhole", "button"),
-                checkpoint_text="SAVINGS BALANCE READY",
+                ref=ref("Search members", "button"),
+                checkpoint_text="MEMBER PROFILE READY",
             )
             if self.turn == 4
             else None,
@@ -94,7 +94,7 @@ class ScriptedModel:
                     kind="act",
                     intent="Read the visible current savings balance",
                     action="extract",
-                    ref=ref("$", "strong"),
+                    ref=ref("Current savings", "strong"),
                     output="savings_balance",
                 )
             return Decision(kind="done", intent="The savings balance was extracted")
@@ -102,10 +102,10 @@ class ScriptedModel:
         if self.turn == 5:
             return Decision(
                 kind="act",
-                intent="Open the new sub-account form",
+                intent="Open the new savings account form",
                 action="click",
-                ref=ref("Open another sub-account", "button"),
-                checkpoint_text="ACCOUNT CARD / PREPARATION",
+                ref=ref("Open savings account", "button"),
+                checkpoint_text="New savings account",
             )
         if self.turn == 6:
             return Decision(
@@ -134,18 +134,18 @@ class ScriptedModel:
         if self.turn == 9:
             return Decision(
                 kind="act",
-                intent="Review the prepared account card",
+                intent="Review the prepared account",
                 action="click",
-                ref=ref("Review card", "button"),
-                checkpoint_text="ACCOUNT CARD / FINAL CHECK",
+                ref=ref("Review account", "button"),
+                checkpoint_text="Review new account",
             )
         if self.turn == 10:
             return Decision(
                 kind="act",
-                intent="Confirm creation of the reviewed account card",
+                intent="Confirm creation of the reviewed account",
                 action="click",
                 ref=ref("Confirm and create account", "button"),
-                checkpoint_text="ACCOUNT CARD CREATED",
+                checkpoint_text="ACCOUNT CREATED",
                 risk=Risk.MUTATING,
             )
         if self.turn == 11:
@@ -153,8 +153,7 @@ class ScriptedModel:
                 kind="act",
                 intent="Read the visible new account identifier",
                 action="extract",
-                ref=ref("S-", "span"),
+                ref=ref("New account", "span"),
                 output="account_id",
             )
         return Decision(kind="done", intent="The new account confirmation was reached")
-

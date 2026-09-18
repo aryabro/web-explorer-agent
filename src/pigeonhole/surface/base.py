@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from pigeonhole.contracts import BoundingBox, Checkpoint, Recovery, TargetBundle
 
@@ -23,16 +23,42 @@ class ControlObservation(BaseModel):
     role: str | None = None
     accessible_name: str | None = None
     has_value: bool = False
+    interactive: bool = True
+    disabled: bool = False
+    checked: bool | None = None
+    required: bool = False
+    read_only: bool = False
+    expanded: bool | None = None
     nearby_text: str = ""
     visible_text: str = ""
     geometry: BoundingBox
 
 
+class FrameObservation(BaseModel):
+    """A bounded, frame-aware view of the current page.
+
+    Controls stay in the flat list for action lookup, while this summary gives
+    the decision model the document/frame structure it needs for orientation.
+    """
+
+    key: str
+    url: str = ""
+    visible_text: str = ""
+    control_refs: list[str] = Field(default_factory=list)
+
+
 class Observation(BaseModel):
+    observation_id: str = "legacy"
+    captured_at: str | None = None
     url: str
     title: str
     visible_text: str
     controls: list[ControlObservation]
+    frames: list[FrameObservation] = Field(default_factory=list)
+    dialogs: list[str] = Field(default_factory=list)
+    alerts: list[str] = Field(default_factory=list)
+    busy: bool = False
+    truncated: bool = False
     digest: str
 
 
@@ -41,13 +67,17 @@ class SurfaceDriver(Protocol):
 
     async def observe(self) -> Observation: ...
 
-    async def act(self, action: str, ref: str | None = None, value: Any = None) -> Any: ...
+    async def act(
+        self, action: str, ref: str | None = None, value: Any = None
+    ) -> Any: ...
 
     async def harvest(self, ref: str) -> TargetBundle: ...
 
     async def resolve(self, target: TargetBundle): ...
 
-    async def act_target(self, action: str, target: TargetBundle, value: Any = None) -> Any: ...
+    async def act_target(
+        self, action: str, target: TargetBundle, value: Any = None
+    ) -> Any: ...
 
     async def recover(self, recovery: Recovery) -> bool: ...
 
@@ -55,7 +85,9 @@ class SurfaceDriver(Protocol):
 
     async def checkpoint(self, checkpoint: Checkpoint) -> bool: ...
 
-    async def screenshot(self, path: str, redact_values: list[str] | None = None) -> None: ...
+    async def screenshot(
+        self, path: str, redact_values: list[str] | None = None
+    ) -> None: ...
 
     async def pause(self) -> None: ...
 

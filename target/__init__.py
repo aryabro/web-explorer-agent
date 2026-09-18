@@ -1,2 +1,1 @@
-"""Night Window local legacy target."""
-
+"""Test Bank local legacy target."""

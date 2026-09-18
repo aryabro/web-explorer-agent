@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-import json
 import asyncio
+import json
 import re
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Any, Awaitable, Callable, Protocol
+from time import monotonic
+from typing import Any, Literal, Protocol
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
@@ -21,15 +23,18 @@ from pigeonhole.contracts import (
     StepDiagnostic,
     TargetBundle,
 )
-from pigeonhole.surface.base import SurfaceDriver
+from pigeonhole.policy import PolicyEngine
+from pigeonhole.redact import Redactor
+from pigeonhole.surface.base import Observation, SurfaceDriver
 
 
 class Decision(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    kind: str
+    kind: Literal["act", "done", "stuck"]
     intent: str = ""
-    action: str | None = None
+    action: Literal["click", "type", "select", "extract", "dismiss"] | None = None
     ref: str | None = None
+    observation_id: str | None = None
     input_name: str | None = None
     literal: str | float | int | bool | None = None
     output: str | None = None
@@ -49,6 +54,44 @@ class RecordedStep(BaseModel):
     risk: Risk
     before_digest: str
     after_digest: str
+    execution_status: Literal["succeeded", "failed", "checkpoint_failed"] = "succeeded"
+    result_detail: str | None = None
+    checkpoint_verified: bool | None = None
+
+
+class RecentAction(BaseModel):
+    action: str
+    intent: str
+    target: str | None = None
+    result: str
+    checkpoint: str | None = None
+
+
+class DiscoveryBudget(BaseModel):
+    step: int
+    max_steps: int
+    steps_remaining: int
+    seconds_remaining: int
+
+
+class ModelTurn(BaseModel):
+    """Typed, redaction-ready context sent to the discovery model."""
+
+    goal: str
+    target_guidance: dict[str, Any] | None = None
+    declared_inputs: dict[str, Any]
+    required_outputs: dict[str, Any]
+    terminal_states: list[dict[str, Any]] = Field(default_factory=list)
+    outputs_already_extracted: list[str]
+    recent_actions: list[RecentAction]
+    feedback: str
+    budget: DiscoveryBudget
+    observation: Observation
+
+
+class CompletionAssessment(BaseModel):
+    complete: bool
+    reasons: list[str] = Field(default_factory=list)
 
 
 class Recording(BaseModel):
@@ -72,6 +115,51 @@ class DiscoveryResult(BaseModel):
     llm_calls: int
 
 
+class CompletionVerifier:
+    """Independently verifies completion from recorded and observed evidence."""
+
+    async def assess(
+        self,
+        *,
+        surface: SurfaceDriver,
+        steps: list[RecordedStep],
+        outputs: dict[str, Any],
+        required_outputs: list[str],
+        terminal_states: list[Any] | None = None,
+    ) -> CompletionAssessment:
+        reasons: list[str] = []
+        missing = sorted(set(required_outputs) - set(outputs))
+        if missing:
+            reasons.append(f"missing required outputs: {missing}")
+        unsafe = [step.id for step in steps if step.execution_status != "succeeded"]
+        if unsafe:
+            reasons.append(f"actions without verified success: {unsafe}")
+        transitions = [
+            step
+            for step in steps
+            if step.action.type in {"click", "navigate", "dismiss"}
+        ]
+        unverified = [
+            step.id
+            for step in transitions
+            if step.checkpoint is None or step.checkpoint_verified is not True
+        ]
+        if unverified:
+            reasons.append(
+                f"screen transitions without verified checkpoints: {unverified}"
+            )
+        checkpoints = [step.checkpoint for step in steps if step.checkpoint is not None]
+        if checkpoints and not await surface.checkpoint_visible(checkpoints[-1]):
+            reasons.append("the final verified checkpoint is no longer visible")
+        for state in terminal_states or []:
+            checkpoint = getattr(state, "checkpoint", None)
+            if checkpoint is not None and await surface.checkpoint_visible(checkpoint):
+                reasons.append(
+                    f"terminal state is visible: {getattr(state, 'code', checkpoint.id)}"
+                )
+        return CompletionAssessment(complete=not reasons, reasons=reasons)
+
+
 class DecisionModel(Protocol):
     name: str
 
@@ -82,6 +170,7 @@ class OpenAICompatibleModel:
     def __init__(self, config: LLMConfig) -> None:
         self.config = config
         self.name = config.model
+        self.last_metadata: dict[str, Any] = {}
 
     async def decide(self, prompt: str) -> Decision:
         payload = {
@@ -94,6 +183,7 @@ class OpenAICompatibleModel:
                 {"role": "user", "content": prompt},
             ],
         }
+        request_started = monotonic()
         async with httpx.AsyncClient(timeout=90) as client:
             for attempt in range(4):
                 response = await client.post(
@@ -118,7 +208,14 @@ class OpenAICompatibleModel:
                     f"model request failed ({response.status_code}): "
                     f"{response.text[:500]}"
                 )
-        message = response.json()["choices"][0]["message"]
+        response_data = response.json()
+        self.last_metadata = {
+            "request_id": response_data.get("id"),
+            "model": response_data.get("model", self.name),
+            "usage": response_data.get("usage"),
+            "latency_ms": round((monotonic() - request_started) * 1000),
+        }
+        message = response_data["choices"][0]["message"]
         calls = message.get("tool_calls") or []
         if not calls:
             raise RuntimeError("model did not return a tool call")
@@ -126,7 +223,12 @@ class OpenAICompatibleModel:
         data = json.loads(call.get("arguments") or "{}")
         if not isinstance(data, dict):
             data = {}
-        data["kind"] = call.get("name") or "stuck"
+        tool_name = call.get("name") or "stuck"
+        if tool_name in {"click", "type", "select", "extract", "dismiss"}:
+            data["kind"] = "act"
+            data["action"] = tool_name
+        else:
+            data["kind"] = tool_name
         return _decision_from_payload(data)
 
 
@@ -150,40 +252,76 @@ def _decision_from_payload(data: dict[str, Any]) -> Decision:
     return Decision.model_validate(payload)
 
 
-DISCOVERY_TOOLS = [
-    {
+_REF_PROPERTIES = {
+    "intent": {"type": "string"},
+    "ref": {
+        "type": "string",
+        "description": "Observation-scoped control ref exactly as listed, e.g. o4:c3",
+    },
+    "observation_id": {
+        "type": "string",
+        "description": "The current observation_id",
+    },
+    "risk": {
+        "type": "string",
+        "enum": ["safe", "mutating", "irreversible"],
+    },
+}
+
+
+def _action_tool(
+    name: str,
+    description: str,
+    *,
+    properties: dict[str, Any] | None = None,
+    required: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
         "type": "function",
         "function": {
-            "name": "act",
-            "description": "Act on one ephemeral observation ref. Never invent CSS or selectors.",
+            "name": name,
+            "description": description,
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "intent": {"type": "string"},
-                    "action": {
-                        "type": "string",
-                        "enum": ["click", "type", "select", "extract", "dismiss"],
-                    },
-                    "ref": {
-                        "type": "string",
-                        "description": "Ephemeral control ref from the observation, e.g. c3",
-                    },
-                    "input_name": {"type": ["string", "null"]},
-                    "literal": {
-                        "type": ["string", "number", "boolean", "null"]
-                    },
-                    "output": {"type": ["string", "null"]},
-                    "checkpoint_text": {"type": ["string", "null"]},
-                    "risk": {
-                        "type": "string",
-                        "enum": ["safe", "mutating", "irreversible"],
-                    },
-                    "reason": {"type": ["string", "null"]},
-                },
-                "required": ["intent", "action", "ref"],
+                "properties": {**_REF_PROPERTIES, **(properties or {})},
+                "required": ["intent", "ref", "observation_id", *(required or [])],
+                "additionalProperties": False,
             },
         },
-    },
+    }
+
+
+DISCOVERY_TOOLS = [
+    _action_tool(
+        "click",
+        "Click an interactive ref and name the visible destination checkpoint.",
+        properties={"checkpoint_text": {"type": "string"}},
+        required=["checkpoint_text"],
+    ),
+    _action_tool(
+        "type",
+        "Fill a text control from a declared input, never with its secret value.",
+        properties={"input_name": {"type": "string"}},
+        required=["input_name"],
+    ),
+    _action_tool(
+        "select",
+        "Select an option using a declared input.",
+        properties={"input_name": {"type": "string"}},
+        required=["input_name"],
+    ),
+    _action_tool(
+        "extract",
+        "Extract visible text into a declared output.",
+        properties={"output": {"type": "string"}},
+        required=["output"],
+    ),
+    _action_tool(
+        "dismiss",
+        "Dismiss an interstitial and name the visible destination checkpoint.",
+        properties={"checkpoint_text": {"type": "string"}},
+        required=["checkpoint_text"],
+    ),
     {
         "type": "function",
         "function": {
@@ -212,21 +350,27 @@ DISCOVERY_TOOLS = [
 
 
 DISCOVERY_SYSTEM_PROMPT = """You operate an unfamiliar UI to accomplish one goal.
-You receive a hybrid observation with ephemeral refs (c0, c1, …). Each ref includes
-nearby text, frame, element type and geometry. Choose a ref from the observation.
+Refs are scoped to exactly one observation (for example o4:c1). Echo the current
+observation_id with every action call. A ref from an earlier observation is invalid.
+The current observation is bounded, frame-aware, and authoritative.
+Each listed ref includes nearby text, frame, element type and geometry. Choose a
+ref from the current observation.
 Never invent CSS, selectors, or refs that are not listed.
 
 Call exactly one tool:
-- act: click, type, select, extract, or dismiss a listed ref
-- done: only after every required output was extracted via act/extract
+- click, type, select, extract, or dismiss: act on a listed ref
+- done: only after every required output was extracted
 - stuck: the UI cannot be progressed safely
 
 Rules:
 - To type, set input_name to a declared input; never send the secret value.
 - To extract, set output to a declared output name, never the visible value.
 - has_value=true means a field is already filled; do not type it again.
-- For a click that changes screens, set checkpoint_text to visible destination text.
+- Respect disabled, required, checked, expanded, dialog, alert, and busy state.
+- For click or dismiss, set checkpoint_text to visible destination text.
 - Treat the current observation as authoritative.
+- Action history is semantic and ref-free; never copy a ref from history.
+- You propose actions; the runtime independently verifies action and task success.
 - If feedback says the UI did not change, pick a different control or call stuck.
 """
 
@@ -243,9 +387,11 @@ class DiscoveryLoop:
         self,
         surface: SurfaceDriver,
         model: DecisionModel,
-        policy: Any,
+        policy: PolicyEngine,
         *,
         max_steps: int = 20,
+        timeout_seconds: int = 300,
+        max_no_progress_steps: int = 3,
         event_sink: EventSink = _noop_event,
         confirmed_risks: set[Risk] | None = None,
         handoff: Any | None = None,
@@ -253,11 +399,15 @@ class DiscoveryLoop:
         on_intervention: Callable[[Any], Awaitable[bool]] | None = None,
         capability_id: str = "discovery",
         redact_values: list[str] | None = None,
+        redactor: Redactor | None = None,
+        completion_verifier: CompletionVerifier | None = None,
     ) -> None:
         self.surface = surface
         self.model = model
         self.policy = policy
         self.max_steps = max_steps
+        self.timeout_seconds = timeout_seconds
+        self.max_no_progress_steps = max_no_progress_steps
         self.event = event_sink
         self.confirmed_risks = confirmed_risks or set()
         self.handoff = handoff
@@ -265,6 +415,12 @@ class DiscoveryLoop:
         self.on_intervention = on_intervention
         self.capability_id = capability_id
         self.redact_values = redact_values or []
+        self.redactor = (
+            redactor
+            or getattr(evidence, "redactor", None)
+            or Redactor(self.redact_values)
+        )
+        self.completion_verifier = completion_verifier or CompletionVerifier()
 
     async def run(
         self,
@@ -274,16 +430,50 @@ class DiscoveryLoop:
         inputs: dict[str, Any],
         input_names: list[str],
         required_outputs: list[str],
+        input_definitions: dict[str, Any] | None = None,
+        output_definitions: dict[str, Any] | None = None,
+        business_outcomes: list[Any] | None = None,
+        fatal_states: list[Any] | None = None,
         hints: list[str] | None = None,
         preferred_frame: str | None = None,
         click_recoveries: list[Recovery] | None = None,
     ) -> DiscoveryResult:
         started = datetime.now(UTC)
+        deadline = monotonic() + self.timeout_seconds
         guidance: dict[str, Any] = {}
         if preferred_frame:
             guidance["preferred_frame"] = preferred_frame
         if hints:
             guidance["notes"] = list(hints)
+        entry = self.policy.evaluate(
+            url=target,
+            action="navigate",
+            risk=Risk.SAFE,
+            intent="open discovery target",
+        )
+        await self.event(
+            "policy_evaluated",
+            {**entry.model_dump(mode="json"), "phase": "entry", "url": target},
+        )
+        if entry.disposition != "allow":
+            completed = datetime.now(UTC)
+            recording = Recording(
+                goal=goal,
+                target=target,
+                model=self.model.name,
+                started_at=started,
+                completed_at=completed,
+                steps=[],
+                output_names=required_outputs,
+                success=False,
+                stop_reason=f"policy_{entry.disposition}",
+            )
+            return DiscoveryResult(
+                status="stopped",
+                recording=recording,
+                outputs={},
+                llm_calls=0,
+            )
         await self.surface.act("navigate", value=target)
         steps: list[RecordedStep] = []
         outputs: dict[str, Any] = {}
@@ -294,6 +484,9 @@ class DiscoveryLoop:
         feedback = ""
 
         for index in range(self.max_steps):
+            if monotonic() >= deadline:
+                stop_reason = "timeout"
+                break
             observation = await self.surface.observe()
             await self.event(
                 "observed",
@@ -304,29 +497,86 @@ class DiscoveryLoop:
                     "visible_text": observation.visible_text,
                 },
             )
-            prompt = json.dumps(
-                {
-                    "goal": goal,
-                    **({"target_guidance": guidance} if guidance else {}),
-                    "declared_inputs": input_names,
-                    "required_outputs": required_outputs,
-                    "outputs_already_extracted": list(outputs),
-                    "recent_actions": [
-                        {
-                            "action": step.action.type,
-                            "intent": step.intent,
-                            "checkpoint": (
-                                step.checkpoint.expected if step.checkpoint else None
-                            ),
-                        }
-                        for step in steps[-6:]
-                    ],
-                    "feedback": feedback,
-                    "observation": observation.model_dump(mode="json"),
-                }
+
+            def _definition(value: Any) -> Any:
+                return (
+                    value.model_dump(mode="json", exclude_none=True)
+                    if hasattr(value, "model_dump")
+                    else value
+                )
+
+            turn = ModelTurn(
+                goal=goal,
+                target_guidance=guidance or None,
+                declared_inputs={
+                    name: _definition(
+                        (input_definitions or {}).get(name, {"type": "string"})
+                    )
+                    for name in input_names
+                },
+                required_outputs={
+                    name: _definition(
+                        (output_definitions or {}).get(name, {"type": "string"})
+                    )
+                    for name in required_outputs
+                },
+                terminal_states=[
+                    _definition(state)
+                    for state in [*(business_outcomes or []), *(fatal_states or [])]
+                ],
+                outputs_already_extracted=list(outputs),
+                recent_actions=[
+                    RecentAction(
+                        action=step.action.type,
+                        intent=step.intent,
+                        target=step.target.description if step.target else None,
+                        result=step.execution_status,
+                        checkpoint=step.checkpoint.expected
+                        if step.checkpoint
+                        else None,
+                    )
+                    for step in steps[-8:]
+                ],
+                feedback=feedback,
+                budget=DiscoveryBudget(
+                    step=index + 1,
+                    max_steps=self.max_steps,
+                    steps_remaining=self.max_steps - index - 1,
+                    seconds_remaining=max(0, int(deadline - monotonic())),
+                ),
+                observation=(
+                    observation.model_copy(update={"visible_text": ""})
+                    if observation.frames
+                    else observation
+                ),
             )
-            decision = await self.model.decide(prompt)
+            prompt = json.dumps(
+                self.redactor.for_model(turn.model_dump(mode="json", exclude_none=True))
+            )
             llm_calls += 1
+            try:
+                decision = await asyncio.wait_for(
+                    self.model.decide(prompt),
+                    timeout=max(0.1, min(90.0, deadline - monotonic())),
+                )
+            except TimeoutError:
+                stop_reason = "model_timeout"
+                await self.event(
+                    "model_failed", {"reason": stop_reason, "step": index + 1}
+                )
+                break
+            except Exception as exc:
+                stop_reason = "model_error"
+                await self.event(
+                    "model_failed",
+                    {
+                        "reason": stop_reason,
+                        "step": index + 1,
+                        "error_type": type(exc).__name__,
+                        "message": str(exc),
+                    },
+                )
+                break
             await self.event(
                 "model_decided",
                 {
@@ -336,16 +586,24 @@ class DiscoveryLoop:
                     "ref": decision.ref,
                     "input_name": decision.input_name,
                     "output": decision.output,
+                    "metadata": getattr(self.model, "last_metadata", None),
                 },
             )
 
             if decision.kind == "done":
-                missing_now = set(required_outputs) - set(outputs)
-                if missing_now:
-                    feedback = (
-                        "Do not declare done yet. Use action='extract' on the "
-                        f"visible value ref and output one of {sorted(missing_now)}."
-                    )
+                assessment = await self.completion_verifier.assess(
+                    surface=self.surface,
+                    steps=steps,
+                    outputs=outputs,
+                    required_outputs=required_outputs,
+                    terminal_states=[
+                        *(business_outcomes or []),
+                        *(fatal_states or []),
+                    ],
+                )
+                await self.event("completion_verified", assessment.model_dump())
+                if not assessment.complete:
+                    feedback = "Completion rejected: " + "; ".join(assessment.reasons)
                     continue
                 success = True
                 stop_reason = "goal_met"
@@ -379,6 +637,15 @@ class DiscoveryLoop:
                     feedback = f"{decision.action} requires an observation ref."
                     continue
                 known_refs = {control.ref for control in observation.controls}
+                if (
+                    decision.observation_id is not None
+                    and decision.observation_id != observation.observation_id
+                ):
+                    feedback = (
+                        f"Stale observation {decision.observation_id}. Use only refs from "
+                        f"current observation {observation.observation_id}."
+                    )
+                    continue
                 if decision.ref not in known_refs:
                     if not known_refs:
                         feedback = (
@@ -401,13 +668,17 @@ class DiscoveryLoop:
                     "visible value."
                 )
                 continue
-            if decision.action == "click" and not decision.checkpoint_text:
+            if decision.action in {"click", "dismiss"} and not decision.checkpoint_text:
                 feedback = (
-                    "screen-changing click requires checkpoint_text describing "
+                    f"{decision.action} requires checkpoint_text describing "
                     "the visible destination state."
                 )
                 continue
-            if decision.action == "click" and decision.ref and decision.checkpoint_text:
+            if (
+                decision.action in {"click", "dismiss"}
+                and decision.ref
+                and decision.checkpoint_text
+            ):
                 clicked = next(
                     (
                         control
@@ -416,39 +687,83 @@ class DiscoveryLoop:
                     ),
                     None,
                 )
-                labels = {
-                    (clicked.visible_text or "").strip(),
-                    (clicked.accessible_name or "").strip(),
-                } if clicked else set()
+                labels = (
+                    {
+                        (clicked.visible_text or "").strip(),
+                        (clicked.accessible_name or "").strip(),
+                    }
+                    if clicked
+                    else set()
+                )
                 if decision.checkpoint_text.strip() in labels:
                     feedback = (
                         "checkpoint_text must describe the destination screen, "
                         "not the control you just clicked."
                     )
                     continue
+            control = next(
+                (item for item in observation.controls if item.ref == decision.ref),
+                None,
+            )
+            if control is not None and control.disabled:
+                feedback = f"Ref {decision.ref} is disabled in the current observation."
+                continue
             if (
-                decision.risk != Risk.SAFE
-                and decision.risk not in self.confirmed_risks
+                control is not None
+                and decision.action in {"click", "dismiss"}
+                and not control.interactive
             ):
-                decision = decision.model_copy(update={"risk": Risk.SAFE})
-
-            policy_decision = self.policy.evaluate(
-                url=observation.url,
+                feedback = f"Ref {decision.ref} is not an interactive control."
+                continue
+            if (
+                control is not None
+                and decision.action == "type"
+                and control.element_type not in {"input", "textarea"}
+            ):
+                feedback = f"Ref {decision.ref} is not a text-entry control."
+                continue
+            if (
+                control is not None
+                and decision.action == "select"
+                and control.element_type != "select"
+            ):
+                feedback = f"Ref {decision.ref} is not a select control."
+                continue
+            inferred = self.policy.infer_risk(action=decision.action, control=control)
+            await self.event(
+                "risk_inferred",
+                {
+                    "proposed": decision.risk,
+                    "inferred": inferred,
+                    "advisory_only": True,
+                },
+            )
+            policy_url = self.policy.location(
                 action=decision.action,
-                risk=decision.risk,
+                current_url=observation.url,
+                value=None,
+            )
+            policy_decision = self.policy.evaluate(
+                url=policy_url,
+                action=decision.action,
+                risk=inferred,
                 intent=decision.intent,
             )
-            await self.event("policy_evaluated", policy_decision.model_dump(mode="json"))
+            await self.event(
+                "policy_evaluated", policy_decision.model_dump(mode="json")
+            )
             if (
                 policy_decision.disposition == "confirm"
-                and decision.risk in self.confirmed_risks
+                and inferred in self.confirmed_risks
             ):
                 await self.event(
                     "human_confirmed",
-                    {"risk": decision.risk, "intent": decision.intent},
+                    {"risk": inferred, "intent": decision.intent},
                 )
             elif policy_decision.disposition != "allow":
-                feedback = f"Policy {policy_decision.disposition}: {policy_decision.reason}"
+                feedback = (
+                    f"Policy {policy_decision.disposition}: {policy_decision.reason}"
+                )
                 continue
 
             try:
@@ -461,6 +776,32 @@ class DiscoveryLoop:
                 feedback = f"Could not harvest ref {decision.ref}: {exc}"
                 await self.event("action_failed", {"error": feedback})
                 continue
+            if target_bundle is not None:
+                safe_strategies = [
+                    strategy
+                    for strategy in target_bundle.strategies
+                    if self.redactor.data(strategy.model_dump(mode="json"))
+                    == strategy.model_dump(mode="json")
+                ]
+                if not safe_strategies:
+                    feedback = (
+                        "The selected control has no persistable target strategy after "
+                        "sensitive-data filtering. Choose a label-based control."
+                    )
+                    await self.event("target_rejected", {"reason": feedback})
+                    continue
+                if len(safe_strategies) != len(target_bundle.strategies):
+                    await self.event(
+                        "target_sanitized",
+                        {
+                            "removed_strategies": len(target_bundle.strategies)
+                            - len(safe_strategies)
+                        },
+                    )
+                target_bundle = TargetBundle(
+                    description=self.redactor.text(target_bundle.description),
+                    strategies=safe_strategies,
+                )
             value_source = None
             runtime_value = None
             if decision.input_name:
@@ -486,28 +827,53 @@ class DiscoveryLoop:
                 if decision.checkpoint_text
                 else None
             )
+            extracted = None
+            execution_status: Literal["succeeded", "failed", "checkpoint_failed"] = (
+                "succeeded"
+            )
+            result_detail: str | None = None
+            checkpoint_verified: bool | None = None
             try:
                 extracted = await self.surface.act(
                     decision.action, decision.ref, runtime_value
                 )
-                if checkpoint is not None and not await self.surface.checkpoint(
-                    checkpoint
-                ):
-                    feedback = (
-                        "Destination checkpoint was not visible after the action. "
-                        "Use checkpoint_text from the new screen, not the control "
-                        "you clicked."
-                    )
-                    await self.event("action_failed", {"error": feedback})
-                    continue
+                if checkpoint is not None:
+                    checkpoint_verified = await self.surface.checkpoint(checkpoint)
+                    if not checkpoint_verified:
+                        execution_status = "checkpoint_failed"
+                        result_detail = (
+                            "Destination checkpoint was not visible after the action."
+                        )
             except Exception as exc:
-                feedback = f"Action failed: {type(exc).__name__}: {exc}"
-                await self.event("action_failed", {"error": feedback})
-                continue
-            if decision.output:
-                outputs[decision.output] = extracted
+                execution_status = "failed"
+                result_detail = f"{type(exc).__name__}: {exc}"
 
-            after = await self.surface.observe()
+            # An attempted action is evidence even when its postcondition fails.
+            # Recording it prevents a later `done` call from compiling a fiction.
+            try:
+                after = await self.surface.observe()
+            except Exception:
+                after = observation
+            if execution_status == "succeeded" and after.url != observation.url:
+                redirect_policy = self.policy.evaluate(
+                    url=after.url,
+                    action="navigate",
+                    risk=Risk.SAFE,
+                    intent="validate action destination",
+                )
+                await self.event(
+                    "policy_evaluated",
+                    {
+                        **redirect_policy.model_dump(mode="json"),
+                        "phase": "post_action_destination",
+                        "url": after.url,
+                    },
+                )
+                if redirect_policy.disposition != "allow":
+                    execution_status = "failed"
+                    result_detail = (
+                        "Action navigated outside policy: " + redirect_policy.reason
+                    )
             recoveries: list[Recovery] = []
             if decision.action == "click":
                 recoveries = list(click_recoveries or [])
@@ -519,9 +885,12 @@ class DiscoveryLoop:
                     target=target_bundle,
                     checkpoint=checkpoint,
                     recover=recoveries,
-                    risk=decision.risk,
+                    risk=inferred,
                     before_digest=observation.digest,
                     after_digest=after.digest,
+                    execution_status=execution_status,
+                    result_detail=result_detail,
+                    checkpoint_verified=checkpoint_verified,
                 )
             )
             await self.event(
@@ -530,8 +899,30 @@ class DiscoveryLoop:
                     "step_id": steps[-1].id,
                     "action": decision.action,
                     "after_digest": after.digest,
+                    "execution_status": execution_status,
+                    "checkpoint_verified": checkpoint_verified,
                 },
             )
+            if execution_status != "succeeded":
+                feedback = result_detail or "Action did not reach its postcondition."
+                await self.event(
+                    "action_failed",
+                    {"step_id": steps[-1].id, "error": feedback},
+                )
+                stop_reason = execution_status
+                if await self._intervene(
+                    goal=goal,
+                    reason=feedback,
+                    step_id=steps[-1].id,
+                ):
+                    feedback = (
+                        "Operator returned the session, but the failed action remains "
+                        "recorded. Inspect state and report stuck if it is ambiguous."
+                    )
+                    continue
+                break
+            if decision.output:
+                outputs[decision.output] = extracted
             if (
                 decision.action in {"click", "type", "select", "dismiss"}
                 and after.digest == observation.digest
@@ -544,7 +935,7 @@ class DiscoveryLoop:
             else:
                 stagnant_actions = 0
                 feedback = ""
-            if stagnant_actions >= 3:
+            if stagnant_actions >= self.max_no_progress_steps:
                 stop_reason = "dead_end"
                 if await self._intervene(
                     goal=goal,
@@ -558,6 +949,8 @@ class DiscoveryLoop:
                     continue
                 break
 
+        if not success:
+            await self._capture_failure_evidence(stop_reason)
         completed = datetime.now(UTC)
         recording = Recording(
             goal=goal,
@@ -577,9 +970,25 @@ class DiscoveryLoop:
             llm_calls=llm_calls,
         )
 
-    async def _intervene(
-        self, *, goal: str, reason: str, step_id: str | None
-    ) -> bool:
+    async def _capture_failure_evidence(self, reason: str) -> None:
+        if self.evidence is None or not hasattr(self.evidence, "directory"):
+            return
+        destination = self.evidence.directory / "screenshots" / "discovery-failure.png"
+        try:
+            await self.surface.screenshot(
+                str(destination), redact_values=self.redact_values
+            )
+            await self.event(
+                "failure_evidence_captured",
+                {"reason": reason, "screenshot": str(destination)},
+            )
+        except Exception as exc:
+            await self.event(
+                "failure_evidence_failed",
+                {"reason": reason, "error_type": type(exc).__name__},
+            )
+
+    async def _intervene(self, *, goal: str, reason: str, step_id: str | None) -> bool:
         diagnostic = StepDiagnostic(
             step_id=step_id,
             code=FailureCode.ACTION_FAILED,
@@ -606,4 +1015,3 @@ class DiscoveryLoop:
         if self.on_intervention is None:
             return False
         return bool(await self.on_intervention(intervention))
-

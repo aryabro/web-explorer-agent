@@ -1,7 +1,7 @@
 """Write replay evidence bundles against the committed genuine capability.
 
 Does not overwrite the committed genuine discovery bundle.
-Requires nothing except Chromium; starts Night Window on :8765 if needed.
+Requires nothing except Chromium; starts Test Bank Operations on :8765 if needed.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ def _ensure_night_window() -> None:
             if client.connect_ex(("127.0.0.1", 8765)) == 0:
                 return
         threading.Event().wait(0.05)
-    raise RuntimeError("Night Window did not start")
+    raise RuntimeError("Test Bank Operations did not start")
 
 
 async def _engine(surface, writer, *, allow_draft=True, allow_mutating=False, handoff=None):
@@ -91,14 +91,6 @@ async def replay_named(
     surface = await launch_browser(headless=True)
     coordinator = HandoffCoordinator(surface) if handoff else None
     try:
-        if fault:
-            await surface.act(
-                "navigate", value=capability.compatibility.surface.entry_point
-            )
-            await surface.page.evaluate(
-                "(value) => sessionStorage.setItem('night-window:fault', value)",
-                fault,
-            )
         engine = await _engine(
             surface,
             writer,
@@ -106,6 +98,15 @@ async def replay_named(
             allow_mutating=_needs_mutating(capability),
             handoff=coordinator,
         )
+        if fault:
+            blocked = await engine.open_entry(capability, inputs)
+            if blocked is not None:
+                print(run_id, blocked.status, getattr(blocked, "error", None))
+                return
+            await surface.page.evaluate(
+                "(value) => sessionStorage.setItem('night-window:fault', value)",
+                fault,
+            )
         result = await engine.run(capability, inputs, navigate=not fault)
         print(run_id, result.status, getattr(result, "error", None) or getattr(result, "code", None))
     finally:
@@ -123,9 +124,8 @@ async def replay_handoff(run_id: str = "replay-handoff") -> None:
         allow_mutating=_needs_mutating(CAPABILITY),
     )
     try:
-        await surface.act(
-            "navigate", value=CAPABILITY.compatibility.surface.entry_point
-        )
+        blocked = await engine.open_entry(CAPABILITY, INPUTS)
+        assert blocked is None
         await surface.page.evaluate(
             "() => sessionStorage.setItem('night-window:fault', 'session_drop')"
         )
@@ -139,8 +139,8 @@ async def replay_handoff(run_id: str = "replay-handoff") -> None:
         await work.locator("button").click()
         await work.wait_for_url("**/search.html")
         await work.locator("input").first.fill("12345")
-        await work.get_by_text("Pull pigeonhole", exact=True).click()
-        await work.get_by_text("SAVINGS BALANCE READY").wait_for()
+        await work.get_by_text("Search members", exact=True).click()
+        await work.get_by_text("MEMBER PROFILE READY").wait_for()
         await coordinator.hand_back(
             first.intervention_id, "operator-test", "Restored the member detail view"
         )

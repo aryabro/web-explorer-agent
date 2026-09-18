@@ -1,12 +1,12 @@
 <!doctype html>
 <html>
 <head>
-  <title>Member jacket</title>
+  <title>Member profile</title>
   <link rel="stylesheet" href="/static/legacy.css">
   <script src="/static/app.js"></script>
 </head>
 <body>
-  <div class="mast">MEMBER JACKET / ACCOUNT CARDS</div>
+  <div class="mast"><span>MEMBER SERVICES</span><small>North branch profile</small></div>
   <div class="panel" data-content></div>
   <script>
     if (NightWindow.requireSession()) {
@@ -17,29 +17,32 @@
       if (!member) {
         content.innerHTML = `
           <div class="warning"><b>NO MATCHING MEMBER</b><br>
-          No jacket exists for member number ${id.replace(/[^0-9]/g, "")}.</div>
+          No profile exists for member number ${id.replace(/[^0-9]/g, "")}.</div>
           <p><a href="/tenant-b/search.html">Return to Member Search</a></p>`;
       } else if (member.status === "Restricted") {
         content.innerHTML = `
           <div class="warning"><b>PERMISSION DENIED</b><br>
-          Your operator class may not open this member jacket.</div>
+          Your staff role cannot open this member profile.</div>
           <p><a href="/tenant-b/search.html">Return to Member Search</a></p>`;
       } else {
         const savings = member.accounts.find(account => account.product === "Savings");
         content.innerHTML = `
-          <table class="form">
+          <div class="page-intro"><h1>${member.name}</h1><p>Member ${member.memberId} · <span class="badge">${member.status}</span></p></div>
+          <table class="form summary-table">
             <tr><td>Member number</td><td>${member.memberId}</td></tr>
             <tr><td>Member name</td><td>${member.name}</td></tr>
-            <tr><td>Jacket status</td><td>${member.status}</td></tr>
+            <tr><td>Profile status</td><td>${member.status}</td></tr>
+            <tr><td>Customer since</td><td>${member.since}</td></tr>
+            <tr><td>Contact preference</td><td>${member.contact}</td></tr>
           </table>
-          <h3>ACCOUNT CARDS</h3>
-          <table class="form">
-            <tr><td>Account</td><td>Product</td><td>Nickname</td><td>Current balance</td></tr>
-            ${member.accounts.map(account => `<tr><td>${account.id}</td><td>${account.product}</td><td>${account.nickname}</td><td>$${account.balance.toFixed(2)}</td></tr>`).join("")}
+          <div class="section-heading"><h2>Accounts</h2><span>${member.accounts.length} open</span></div>
+          <table class="form data-table">
+            <tr><th>Account</th><th>Product</th><th>Nickname</th><th>Status</th><th>Current balance</th></tr>
+            ${member.accounts.map(account => `<tr><td>${account.id}</td><td>${account.product}</td><td>${account.nickname}</td><td><span class="badge">Open</span></td><td class="money">$${account.balance.toFixed(2)}</td></tr>`).join("")}
           </table>
-          <p class="success"><b>SAVINGS BALANCE READY</b><br>
+          <p class="success"><b>MEMBER PROFILE READY</b><br>
           Current savings balance: <strong>$${savings.balance.toFixed(2)}</strong></p>
-          <p><button>Open another sub-account</button> &nbsp; <a href="/tenant-b/search.html">Search another member</a></p>`;
+          <p class="actions"><button class="primary">Add savings account</button> <a class="button-link" href="/tenant-b/search.html">Search another member</a></p>`;
         NightWindow.saltFields();
         content.querySelector("button").onclick = () => NightWindow.go("open-account");
       }

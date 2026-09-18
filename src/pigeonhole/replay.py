@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +18,7 @@ from pigeonhole.contracts import (
     LocatorVoteRecord,
     OutcomeResult,
     ReplayResult,
+    Risk,
     Step,
     StepDiagnostic,
     SuccessResult,
@@ -23,6 +26,19 @@ from pigeonhole.contracts import (
 from pigeonhole.evidence import EvidenceWriter
 from pigeonhole.policy import PolicyEngine
 from pigeonhole.surface.base import SurfaceDriver, SurfaceResolutionError
+from pigeonhole.tenants import compatibility_fingerprint
+
+EscalatedCallback = Callable[[EscalatedResult], Awaitable[None]]
+
+
+@dataclass
+class ExecutionState:
+    """Cursor preserved across same-session handoff. Live checkpoints correct it."""
+
+    start_index: int = 0
+    completed: list[str] = field(default_factory=list)
+    outputs: dict[str, Any] = field(default_factory=dict)
+    votes: list[LocatorVoteRecord] = field(default_factory=list)
 
 
 class ReplayEngine:
@@ -44,6 +60,27 @@ class ReplayEngine:
         self.handoff = handoff
         self.allow_mutating = allow_mutating
         self.allow_draft = allow_draft
+        self._cursor = ExecutionState()
+
+    async def open_entry(
+        self,
+        capability: Capability,
+        inputs: dict[str, Any],
+    ) -> ReplayResult | None:
+        """Policy-check then navigate to the capability entry point."""
+        url = capability.compatibility.surface.entry_point
+        blocked = await self._policy_gate(
+            url=url,
+            action="navigate",
+            risk=Risk.SAFE,
+            intent="open capability entry",
+            inputs=inputs,
+            capability=capability,
+        )
+        if blocked is not None:
+            return blocked
+        await self.surface.act("navigate", value=url)
+        return None
 
     async def run(
         self,
@@ -52,8 +89,36 @@ class ReplayEngine:
         *,
         start_index: int = 0,
         navigate: bool = True,
+        state: ExecutionState | None = None,
+        wait_for_operator: bool = False,
+        on_escalated: EscalatedCallback | None = None,
     ) -> ReplayResult:
-        votes: list[LocatorVoteRecord] = []
+        cursor = state or ExecutionState(start_index=start_index)
+        while True:
+            result = await self._run_once(
+                capability, inputs, cursor=cursor, navigate=navigate
+            )
+            if result.status != "escalated" or not wait_for_operator:
+                return result
+            if self.handoff is None:
+                return result
+            if on_escalated is not None:
+                await on_escalated(result)
+            else:
+                await self.handoff.wait_for_return(result.intervention_id)
+            await self.handoff.lease.assert_automation()
+            cursor = await self._reconcile_cursor(capability)
+            navigate = False
+
+    async def _run_once(
+        self,
+        capability: Capability,
+        inputs: dict[str, Any],
+        *,
+        cursor: ExecutionState,
+        navigate: bool,
+    ) -> ReplayResult:
+        votes: list[LocatorVoteRecord] = list(cursor.votes)
         missing = [
             name
             for name, definition in capability.contract.inputs.items()
@@ -64,6 +129,31 @@ class ReplayEngine:
                 StepDiagnostic(
                     code=FailureCode.INPUT_INVALID,
                     message=f"missing required inputs: {', '.join(missing)}",
+                ),
+                [],
+                inputs,
+                votes,
+            )
+        surface_contract = capability.compatibility.surface
+        expected_fingerprint = compatibility_fingerprint(
+            vendor=surface_contract.vendor,
+            product=surface_contract.product,
+            product_version=surface_contract.product_version,
+            entry_point=surface_contract.entry_point,
+        )
+        if (
+            capability.compatibility.fingerprint
+            and capability.compatibility.fingerprint != expected_fingerprint
+        ):
+            return await self._failure(
+                StepDiagnostic(
+                    code=FailureCode.COMPATIBILITY_MISMATCH,
+                    message=(
+                        "capability compatibility fields do not match its fingerprint; "
+                        "apply a tenant profile or requalify the capability"
+                    ),
+                    expected=capability.compatibility.fingerprint,
+                    observed=expected_fingerprint,
                 ),
                 [],
                 inputs,
@@ -101,13 +191,19 @@ class ReplayEngine:
                 votes,
             )
         if navigate:
-            await self.surface.act(
-                "navigate", value=capability.compatibility.surface.entry_point
-            )
-        completed: list[str] = []
-        outputs: dict[str, Any] = {}
+            blocked = await self.open_entry(capability, inputs)
+            if blocked is not None:
+                return blocked
+        completed: list[str] = list(cursor.completed)
+        outputs: dict[str, Any] = dict(cursor.outputs)
+        self._cursor = ExecutionState(
+            start_index=cursor.start_index,
+            completed=completed,
+            outputs=outputs,
+            votes=votes,
+        )
 
-        for step in capability.execution.steps[start_index:]:
+        for step in capability.execution.steps[cursor.start_index :]:
             observation = await self.surface.observe()
             await self.evidence.event(
                 "observed",
@@ -131,15 +227,30 @@ class ReplayEngine:
                     votes,
                 )
 
+            value: Any = None
+            if isinstance(step.action.value, InputValue):
+                value = inputs[step.action.value.name]
+            elif isinstance(step.action.value, LiteralValue):
+                value = step.action.value.value
+
+            location = self.policy.location(
+                action=step.action.type,
+                current_url=observation.url,
+                value=value,
+            )
             decision = self.policy.evaluate(
-                url=observation.url,
+                url=location,
                 action=step.action.type,
                 risk=step.risk,
                 intent=step.intent,
             )
             await self.evidence.event(
                 "policy_evaluated",
-                {"step_id": step.id, **decision.model_dump(mode="json")},
+                {
+                    "step_id": step.id,
+                    "url": location,
+                    **decision.model_dump(mode="json"),
+                },
             )
             if decision.disposition == "deny":
                 return await self._failure(
@@ -165,12 +276,6 @@ class ReplayEngine:
                     capability,
                     votes,
                 )
-
-            value: Any = None
-            if isinstance(step.action.value, InputValue):
-                value = inputs[step.action.value.name]
-            elif isinstance(step.action.value, LiteralValue):
-                value = step.action.value.value
 
             try:
                 if self.handoff is not None:
@@ -208,6 +313,12 @@ class ReplayEngine:
             if step.action.output:
                 outputs[step.action.output] = extracted
             completed.append(step.id)
+            self._cursor = ExecutionState(
+                start_index=capability.execution.steps.index(step) + 1,
+                completed=list(completed),
+                outputs=dict(outputs),
+                votes=list(votes),
+            )
             await self.evidence.event(
                 "acted",
                 {
@@ -278,6 +389,28 @@ class ReplayEngine:
                 return index + 1
         return 0
 
+    async def _reconcile_cursor(self, capability: Capability) -> ExecutionState:
+        checkpoint_index = await self.resume_index(capability)
+        prior = self._cursor
+        kept_ids = {step.id for step in capability.execution.steps[:checkpoint_index]}
+        outputs = dict(prior.outputs)
+        for step in capability.execution.steps[checkpoint_index:]:
+            if step.action.output:
+                outputs.pop(step.action.output, None)
+        completed = [step_id for step_id in prior.completed if step_id in kept_ids]
+        for step in capability.execution.steps[:checkpoint_index]:
+            if step.id not in completed:
+                completed.append(step.id)
+        votes = [vote for vote in prior.votes if vote.step_id in kept_ids]
+        cursor = ExecutionState(
+            start_index=checkpoint_index,
+            completed=completed,
+            outputs=outputs,
+            votes=votes,
+        )
+        self._cursor = cursor
+        return cursor
+
     async def continue_after_handoff(
         self,
         capability: Capability,
@@ -285,24 +418,23 @@ class ReplayEngine:
     ) -> ReplayResult:
         """Resume after an operator returns the live session.
 
-        Progress is derived from visible checkpoints on the current page, not
-        from EscalatedResult.completed_steps or any stored cursor.
+        Live checkpoints correct the stored cursor; they do not wipe outputs
+        from steps that still precede the restored position.
         """
         if self.handoff is None:
             raise RuntimeError("cannot resume without a handoff coordinator")
         await self.handoff.lease.assert_automation()
-        start_index = await self.resume_index(capability)
+        cursor = await self._reconcile_cursor(capability)
         await self.evidence.event(
             "resumed",
             {
-                "resume_index": start_index,
+                "resume_index": cursor.start_index,
                 "basis": "live checkpoints",
                 "holder": "automation",
+                "preserved_outputs": sorted(cursor.outputs),
             },
         )
-        return await self.run(
-            capability, inputs, start_index=start_index, navigate=False
-        )
+        return await self._run_once(capability, inputs, cursor=cursor, navigate=False)
 
     async def _settle_step(
         self,
@@ -386,7 +518,9 @@ class ReplayEngine:
             votes,
         )
 
-    def _record_vote(self, step: Step, capability: Capability) -> LocatorVoteRecord | None:
+    def _record_vote(
+        self, step: Step, capability: Capability
+    ) -> LocatorVoteRecord | None:
         vote = getattr(self.surface, "last_vote", None)
         if vote is None:
             return None
@@ -401,11 +535,7 @@ class ReplayEngine:
             strategy.kind == "semantic"
             for strategy in (step.target.strategies if step.target else [])
         )
-        drifted = (
-            not overridden
-            and had_semantic
-            and "semantic" not in vote.winners
-        )
+        drifted = not overridden and had_semantic and "semantic" not in vote.winners
         return LocatorVoteRecord(
             step_id=step.id,
             winners=list(vote.winners),
@@ -506,6 +636,59 @@ class ReplayEngine:
         self.evidence.write_json("result.json", result)
         return result
 
+    async def _policy_gate(
+        self,
+        *,
+        url: str,
+        action: str,
+        risk: Risk,
+        intent: str,
+        inputs: dict[str, Any],
+        capability: Capability,
+        step_id: str | None = None,
+        completed: list[str] | None = None,
+        votes: list[LocatorVoteRecord] | None = None,
+    ) -> ReplayResult | None:
+        decision = self.policy.evaluate(
+            url=url, action=action, risk=risk, intent=intent
+        )
+        await self.evidence.event(
+            "policy_evaluated",
+            {
+                "phase": "entry",
+                "url": url,
+                "action": action,
+                **decision.model_dump(mode="json"),
+            },
+        )
+        completed = completed or []
+        votes = votes or []
+        if decision.disposition == "deny":
+            return await self._failure(
+                StepDiagnostic(
+                    step_id=step_id,
+                    code=FailureCode.POLICY_DENIED,
+                    message=decision.reason,
+                ),
+                completed,
+                inputs,
+                votes,
+            )
+        if decision.disposition == "confirm" and not self.allow_mutating:
+            return await self._escalate_or_fail(
+                StepDiagnostic(
+                    step_id=step_id,
+                    code=FailureCode.POLICY_REQUIRES_CONFIRMATION,
+                    message=decision.reason,
+                    expected=intent,
+                ),
+                completed,
+                inputs,
+                capability,
+                votes,
+            )
+        return None
+
     async def _escalate_or_fail(
         self,
         diagnostic: StepDiagnostic,
@@ -516,6 +699,12 @@ class ReplayEngine:
     ) -> ReplayResult:
         if self.handoff is None:
             return await self._failure(diagnostic, completed, inputs, votes)
+        self._cursor = ExecutionState(
+            start_index=self._cursor.start_index,
+            completed=list(completed),
+            outputs=dict(self._cursor.outputs),
+            votes=list(votes),
+        )
         await self.surface.pause()
         await self.evidence.event(
             "lease_ceded",

@@ -1,33 +1,31 @@
 <!doctype html>
 <html>
 <head>
-  <title>Member pigeonhole lookup</title>
+  <title>Member search</title>
   <link rel="stylesheet" href="/static/legacy.css">
   <script src="/static/app.js"></script>
 </head>
 <body>
-  <div class="mast">MEMBER PIGEONHOLE / LOOKUP</div>
+  <div class="mast"><span>MEMBER SERVICES</span><small>Search</small></div>
+  <div class="page-intro"><h1>Member search</h1><p>Find a member record using an exact identifier.</p></div>
   <div class="panel" id="search-panel">
-    <p>Enter the five-digit member number from the paper jacket.</p>
     <table class="form">
+      <tr><td>Search by</td><td><select><option>Member number</option><option disabled>Last name</option></select></td></tr>
       <tr>
         <td>Member number</td>
         <td><input inputmode="numeric" maxlength="5" size="12" autocomplete="off"></td>
       </tr>
+      <tr><td>Member status</td><td><select><option>All statuses</option><option>Active only</option></select></td></tr>
       <tr>
-        <td>Search scope</td>
-        <td><select><option>Active and dormant</option><option>Active only</option></select></td>
-      </tr>
-      <tr>
-        <td colspan="2" style="text-align:right"><button>Pull pigeonhole</button></td>
+        <td colspan="2" class="actions"><button class="primary">Search members</button></td>
       </tr>
     </table>
     <div class="warning hidden" data-message></div>
   </div>
   <div class="modal hidden" data-interstitial>
-    <h3>NOTICE FROM RECORDS</h3>
-    <p>The overnight index was recently re-shelved. Confirm that you want to continue.</p>
-    <button>Continue lookup</button>
+    <h3>MEMBER INDEX NOTICE</h3>
+    <p>The member index was recently refreshed. Confirm that you want to continue.</p>
+    <button>Continue search</button>
   </div>
   <script>
     if (NightWindow.requireSession()) {
@@ -58,7 +56,7 @@
         if (fault === "slow") {
           NightWindow.clearFault();
           searchButton.disabled = true;
-          searchButton.textContent = "Index turning...";
+          searchButton.textContent = "Searching...";
           setTimeout(() => completeSearch(id), 6500);
           return;
         }
@@ -82,4 +80,3 @@
   </script>
 </body>
 </html>
-

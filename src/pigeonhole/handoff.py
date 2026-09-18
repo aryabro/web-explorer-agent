@@ -225,13 +225,16 @@ class HandoffCoordinator:
 
         @app.get("/", response_class=HTMLResponse)
         async def index() -> str:
-            cards = "".join(
-                f"""<li><b>{item.capability_id}</b> — {item.status}
+            cards = (
+                "".join(
+                    f"""<li><b>{item.capability_id}</b> — {item.status}
                 <pre>{json.dumps(item.diagnostic, indent=2)}</pre>
                 <button onclick="claim('{item.id}')">Claim</button>
                 <button onclick="giveBack('{item.id}')">Hand back</button></li>"""
-                for item in coordinator.interventions.values()
-            ) or "<li>No intervention is waiting.</li>"
+                    for item in coordinator.interventions.values()
+                )
+                or "<li>No intervention is waiting.</li>"
+            )
             return OPERATOR_HTML.replace("{{CARDS}}", cards)
 
         @app.post("/interventions/{intervention_id}/claim")
@@ -273,4 +276,3 @@ async function post(url, body) {
 function claim(id){post(`/interventions/${id}/claim`, {operator_id});}
 function giveBack(id){post(`/interventions/${id}/hand-back`, {operator_id, note:prompt('What did you do?') || ''});}
 </script></body></html>"""
-

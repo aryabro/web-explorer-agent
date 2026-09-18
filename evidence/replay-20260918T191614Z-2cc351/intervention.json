@@ -1,0 +1,16 @@
+{
+  "id": "4ff11c66c042",
+  "capability_id": "member.read_savings_balance",
+  "goal": "Signs into Night Window, opens a member jacket, and returns the visible current savings balance.",
+  "diagnostic": {
+    "step_id": "s4",
+    "code": "LOCATOR_UNRESOLVED",
+    "message": "SurfaceResolutionError: structural: ambiguous or hidden",
+    "expected": "Read the current savings balance from the member jacket"
+  },
+  "step_id": "s4",
+  "raised_at": "2026-09-18T19:16:30.329205Z",
+  "status": "waiting",
+  "operator_id": null,
+  "note": null
+}

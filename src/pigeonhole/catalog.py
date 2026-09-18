@@ -11,7 +11,9 @@ def capability_dir(path: str | Path = "capabilities") -> Path:
     return Path(path)
 
 
-def iter_capabilities(directory: str | Path = "capabilities") -> list[tuple[Path, Capability]]:
+def iter_capabilities(
+    directory: str | Path = "capabilities",
+) -> list[tuple[Path, Capability]]:
     root = capability_dir(directory)
     found: list[tuple[Path, Capability]] = []
     if not root.exists():

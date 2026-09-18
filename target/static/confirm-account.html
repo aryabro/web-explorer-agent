@@ -1,12 +1,12 @@
 <!doctype html>
 <html>
 <head>
-  <title>Confirm account card</title>
+  <title>Review new account</title>
   <link rel="stylesheet" href="/static/legacy.css">
   <script src="/static/app.js"></script>
 </head>
 <body>
-  <div class="mast">ACCOUNT CARD / FINAL CHECK</div>
+  <div class="mast"><span>ACCOUNT SERVICES</span><small>Review new account</small></div>
   <div class="panel" data-content></div>
   <script>
     if (NightWindow.requireSession()) {
@@ -14,17 +14,23 @@
       const id = sessionStorage.getItem("night-window:selected-member");
       const content = document.querySelector("[data-content]");
       if (!pending || !id) {
-        content.innerHTML = `<div class="warning">No account card is awaiting confirmation.</div>`;
+        content.innerHTML = `<div class="warning">No new account is awaiting confirmation.</div>`;
       } else {
         content.innerHTML = `
-          <div class="warning"><b>MUTATING ACTION</b><br>This will add an account card to member ${id}.</div>
+          <div class="page-intro"><h1>Review new account</h1><p>Verify every field before creating the account.</p></div>
+          <div class="warning"><b>Confirmation required</b><br>This action will create an account for member ${id}.</div>
           <table class="form">
             <tr><td>Product</td><td>${pending.product}</td></tr>
             <tr><td>Nickname</td><td>${pending.nickname}</td></tr>
             <tr><td>Opening deposit</td><td>$${pending.balance.toFixed(2)}</td></tr>
+            <tr><td>Statement delivery</td><td>${pending.delivery}</td></tr>
           </table>
-          <p><button>Confirm and create account</button> &nbsp; <a href="/detail.html">Cancel</a></p>`;
+          <p class="actions"><button class="danger">Confirm and create account</button> <a class="button-link" data-cancel href="#">Cancel</a></p>`;
         NightWindow.saltFields();
+        content.querySelector("[data-cancel]").onclick = function (event) {
+          event.preventDefault();
+          NightWindow.go("detail");
+        };
         content.querySelector("button").onclick = function () {
           const data = NightWindow.ledger();
           const account = {
@@ -42,4 +48,3 @@
   </script>
 </body>
 </html>
-

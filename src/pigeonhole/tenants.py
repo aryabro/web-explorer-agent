@@ -17,11 +17,16 @@ from pigeonhole.contracts import (
 class TenantProfile(StrictModel):
     tenant: str
     entry_point: str
+    vendor: str | None = None
+    product_version: str | None = None
+    version_range: str | None = None
     overrides: TenantOverrides = Field(default_factory=TenantOverrides)
 
     @classmethod
     def load(cls, path: str | Path) -> "TenantProfile":
-        return cls.model_validate(yaml.safe_load(Path(path).read_text(encoding="utf-8")))
+        return cls.model_validate(
+            yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+        )
 
 
 def find_profile(tenant: str, directory: str | Path = "tenants") -> TenantProfile:
@@ -31,12 +36,37 @@ def find_profile(tenant: str, directory: str | Path = "tenants") -> TenantProfil
     return TenantProfile.load(path)
 
 
+def compatibility_fingerprint(
+    *,
+    vendor: str | None,
+    product: str,
+    product_version: str,
+    entry_point: str,
+) -> str:
+    return "|".join(
+        part for part in (vendor, product, product_version, entry_point) if part
+    )
+
+
 def apply_tenant(capability: Capability, profile: TenantProfile) -> Capability:
     """Return a copy specialized to a tenant via sparse label/checkpoint overlays."""
     specialized = capability.model_copy(deep=True)
     specialized.compatibility.tenant = profile.tenant
     specialized.compatibility.surface.entry_point = profile.entry_point
+    if profile.vendor:
+        specialized.compatibility.surface.vendor = profile.vendor
+    if profile.product_version:
+        specialized.compatibility.surface.product_version = profile.product_version
+    if profile.version_range:
+        specialized.compatibility.surface.version_range = profile.version_range
     specialized.compatibility.tenant_overrides = profile.overrides.model_copy(deep=True)
+    specialized.compatibility.fingerprint = compatibility_fingerprint(
+        vendor=specialized.compatibility.surface.vendor,
+        product=specialized.compatibility.surface.product,
+        product_version=profile.product_version
+        or specialized.compatibility.surface.product_version,
+        entry_point=profile.entry_point,
+    )
     for step in specialized.execution.steps:
         target_patch = profile.overrides.targets.get(step.id)
         if target_patch is not None and step.target is not None:

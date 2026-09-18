@@ -20,7 +20,9 @@ class LLMConfig:
         if not key:
             raise RuntimeError("CUA_LLM_API_KEY is required for genuine discovery")
         return cls(
-            base_url=os.getenv("CUA_LLM_BASE_URL", "https://api.openai.com/v1").rstrip("/"),
+            base_url=os.getenv("CUA_LLM_BASE_URL", "https://api.openai.com/v1").rstrip(
+                "/"
+            ),
             api_key=key,
             model=os.getenv("CUA_LLM_MODEL", "gpt-4.1-mini"),
         )
@@ -32,4 +34,3 @@ def target_url() -> str:
 
 def runtime_pin() -> str:
     return os.getenv("NIGHT_WINDOW_PIN", "1937")
-

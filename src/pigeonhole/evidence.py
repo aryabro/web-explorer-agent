@@ -25,7 +25,10 @@ class EvidenceWriter:
         root: str | Path = "evidence",
         run_id: str | None = None,
     ) -> None:
-        self.run_id = run_id or f"{kind}-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:6]}"
+        self.run_id = (
+            run_id
+            or f"{kind}-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:6]}"
+        )
         self.directory = Path(root) / self.run_id
         self.directory.mkdir(parents=True, exist_ok=True)
         self.redactor = redactor
@@ -96,4 +99,3 @@ def _redact_preserving_locators(redactor: Redactor, value: Any) -> Any:
     if isinstance(value, str):
         return redactor.text(value)
     return value
-

@@ -1,21 +1,21 @@
 <!doctype html>
 <html>
 <head>
-  <title>Operator sign on</title>
+  <title>Staff sign in</title>
   <link rel="stylesheet" href="/static/legacy.css">
   <script src="/static/app.js"></script>
   <script src="/runtime-config.js"></script>
 </head>
 <body>
-  <div class="mast">WINDOW AUTHORITY / BAY 17</div>
-  <div class="panel">
-    <p>Identify the operator assigned to this night window.</p>
+  <div class="mast"><span>SECURE ACCESS</span><small>Test Bank Operations</small></div>
+  <div class="page-intro"><h1>Staff sign in</h1><p>Enter your employee credentials to access member services.</p></div>
+  <div class="panel compact-panel">
     <table class="form">
-      <tr><td>Operator code</td><td><input autocomplete="off" size="18"></td></tr>
-      <tr><td>Brass key (PIN)</td><td><input type="password" autocomplete="off" size="18"></td></tr>
-      <tr><td colspan="2" style="text-align:right"><button>Turn the key</button></td></tr>
+      <tr><td>Employee ID</td><td><input autocomplete="off" size="22"></td></tr>
+      <tr><td>Security PIN</td><td><input type="password" autocomplete="off" size="22"></td></tr>
+      <tr><td>Location</td><td><select><option>Main office</option><option>Contact center</option></select></td></tr>
+      <tr><td colspan="2" class="actions"><button class="primary">Sign in</button></td></tr>
     </table>
-    <p class="dim">Training fixture: operator <b>teller7</b>. PIN comes from runtime configuration.</p>
     <div class="warning hidden" data-message></div>
   </div>
   <script>
@@ -35,11 +35,10 @@
         NightWindow.go("search");
       } else {
         const message = document.querySelector("[data-message]");
-        message.textContent = "SIGN-ON REFUSED: operator code or brass key was not accepted.";
+        message.textContent = "SIGN-IN FAILED: employee ID or security PIN was not accepted.";
         message.classList.remove("hidden");
       }
     };
   </script>
 </body>
 </html>
-

@@ -1,4 +1,9 @@
-from pigeonhole.surface.base import ControlObservation, Observation, SurfaceDriver, SurfaceResolutionError
+from pigeonhole.surface.base import (
+    ControlObservation,
+    Observation,
+    SurfaceDriver,
+    SurfaceResolutionError,
+)
 from pigeonhole.surface.playwright import PlaywrightSurface
 
 __all__ = [
@@ -8,4 +13,3 @@ __all__ = [
     "SurfaceDriver",
     "SurfaceResolutionError",
 ]
-

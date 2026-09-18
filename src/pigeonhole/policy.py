@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 import yaml
 from pydantic import BaseModel
 
 from pigeonhole.contracts import Risk
+from pigeonhole.surface.base import ControlObservation
 
 
 class PolicyDecision(BaseModel):
@@ -23,6 +24,13 @@ class PolicyEngine:
     @classmethod
     def load(cls, path: str | Path = "policy.yaml") -> "PolicyEngine":
         return cls(yaml.safe_load(Path(path).read_text(encoding="utf-8")))
+
+    @staticmethod
+    def location(*, action: str, current_url: str, value: Any = None) -> str:
+        """Policy is evaluated against the destination of a navigation."""
+        if action == "navigate" and value:
+            return str(value)
+        return current_url
 
     def evaluate(
         self,
@@ -57,6 +65,24 @@ class PolicyEngine:
             reason=f"{risk} actions are configured as {disposition}",
         )
 
+    def infer_risk(
+        self,
+        *,
+        action: str,
+        control: ControlObservation | None = None,
+    ) -> Risk:
+        """Trusted risk class. Model-declared risk is advisory only."""
+        haystack = _control_label(control)
+        inference = self.document.get("risk_inference") or {}
+        for pattern in inference.get("irreversible", []):
+            if haystack and re.search(pattern, haystack):
+                return Risk.IRREVERSIBLE
+        if action in {"click", "select", "type"}:
+            for pattern in inference.get("mutating", []):
+                if haystack and re.search(pattern, haystack):
+                    return Risk.MUTATING
+        return Risk.SAFE
+
     def _path_allowed(self, path: str) -> bool:
         normalized = path or "/"
         for prefix in self.document["allowed_path_prefixes"]:
@@ -68,3 +94,10 @@ class PolicyEngine:
                 return True
         return False
 
+
+def _control_label(control: ControlObservation | None) -> str:
+    if control is None:
+        return ""
+    return " ".join(
+        part for part in (control.visible_text, control.accessible_name) if part
+    )

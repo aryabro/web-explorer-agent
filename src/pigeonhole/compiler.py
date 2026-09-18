@@ -18,13 +18,14 @@ from pigeonhole.contracts import (
     Provenance,
     Recovery,
     Step,
+    StructuralTarget,
     SuccessCondition,
     SurfaceCompatibility,
-    StructuralTarget,
     TargetBundle,
     TenantOverrides,
 )
 from pigeonhole.discovery import Recording
+from pigeonhole.tenants import compatibility_fingerprint
 
 
 class Job(BaseModel):
@@ -45,12 +46,18 @@ class Job(BaseModel):
     product: str
     product_version: str
     surface_kind: str = "legacy_web"
+    vendor: str | None = None
+    version_range: str | None = None
     tenant: str | None = None
     max_steps: int = 20
+    discovery_timeout_seconds: int = 300
+    max_no_progress_steps: int = 3
 
     @classmethod
     def load(cls, path: str | Path) -> "Job":
-        return cls.model_validate(yaml.safe_load(Path(path).read_text(encoding="utf-8")))
+        return cls.model_validate(
+            yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+        )
 
 
 def compile_recording(
@@ -64,9 +71,26 @@ def compile_recording(
         raise ValueError(
             f"cannot compile unsuccessful recording: {recording.stop_reason}"
         )
+    failed_steps = [
+        step.id for step in recording.steps if step.execution_status != "succeeded"
+    ]
+    if failed_steps:
+        raise ValueError(f"recording contains failed actions: {failed_steps}")
+    unverified_transitions = [
+        step.id
+        for step in recording.steps
+        if step.action.type in {"click", "navigate", "dismiss"}
+        and (step.checkpoint is None or step.checkpoint_verified is not True)
+    ]
+    if unverified_transitions:
+        raise ValueError(
+            "recording contains unverified screen transitions: "
+            f"{unverified_transitions}"
+        )
     checkpoint_ids = [
         step.checkpoint.id for step in recording.steps if step.checkpoint is not None
     ]
+    postcondition_id = checkpoint_ids[-1] if checkpoint_ids else None
     extracted = {
         step.action.output for step in recording.steps if step.action.output is not None
     }
@@ -75,9 +99,24 @@ def compile_recording(
         raise ValueError(f"recording did not extract outputs: {sorted(missing)}")
     steps: list[Step] = []
     for recorded in recording.steps:
-        data = recorded.model_dump(exclude={"before_digest", "after_digest"})
+        data = recorded.model_dump(
+            exclude={
+                "before_digest",
+                "after_digest",
+                "execution_status",
+                "result_detail",
+                "checkpoint_verified",
+            }
+        )
         if recorded.action.type not in {"click", "navigate", "dismiss"}:
             data["checkpoint"] = None
+        elif recorded.checkpoint is not None:
+            data["checkpoint"] = recorded.checkpoint.model_dump()
+            data["checkpoint"]["role"] = (
+                "postcondition"
+                if recorded.checkpoint.id == postcondition_id
+                else "intermediate"
+            )
         output_name = recorded.action.output
         if (
             output_name
@@ -111,14 +150,22 @@ def compile_recording(
                 product=job.product,
                 product_version=job.product_version,
                 entry_point=job.target,
+                vendor=job.vendor,
+                version_range=job.version_range,
             ),
             tenant=job.tenant,
             tenant_overrides=TenantOverrides(),
+            fingerprint=compatibility_fingerprint(
+                vendor=job.vendor,
+                product=job.product,
+                product_version=job.product_version,
+                entry_point=job.target,
+            ),
         ),
         execution=Execution(
             steps=steps,
             success=SuccessCondition(
-                checkpoint_ids=checkpoint_ids[-1:],
+                checkpoint_ids=[postcondition_id] if postcondition_id else [],
                 required_outputs=list(job.outputs),
             ),
             fatal_states=job.fatal_states,
@@ -138,8 +185,6 @@ def compile_recording(
 def save_capability(capability: Capability, path: str | Path) -> None:
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(
-        capability.model_dump_json(indent=2, exclude_none=True),
-        encoding="utf-8",
-    )
-
+    with destination.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(capability.model_dump_json(indent=2, exclude_none=True))
+        handle.write("\n")

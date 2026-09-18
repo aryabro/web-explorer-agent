@@ -11,7 +11,12 @@ from typing import Annotated
 import typer
 import uvicorn
 
-from pigeonhole.catalog import find_capability, iter_capabilities, summarize, tool_definitions
+from pigeonhole.catalog import (
+    find_capability,
+    iter_capabilities,
+    summarize,
+    tool_definitions,
+)
 from pigeonhole.compiler import Job, compile_recording, save_capability
 from pigeonhole.config import LLMConfig, runtime_pin
 from pigeonhole.contracts import Approval, Risk
@@ -108,11 +113,14 @@ async def _discover(
         return True
 
     try:
+        qualification_status: str | None = None
         loop = DiscoveryLoop(
             surface,
             model,
             PolicyEngine.load(),
             max_steps=job.max_steps,
+            timeout_seconds=job.discovery_timeout_seconds,
+            max_no_progress_steps=job.max_no_progress_steps,
             event_sink=evidence.event,
             confirmed_risks={Risk.MUTATING} if allow_mutating else set(),
             handoff=coordinator,
@@ -127,6 +135,10 @@ async def _discover(
             inputs=inputs,
             input_names=list(job.inputs),
             required_outputs=list(job.outputs),
+            input_definitions=job.inputs,
+            output_definitions=job.outputs,
+            business_outcomes=job.business_outcomes,
+            fatal_states=job.fatal_states,
             hints=job.discovery_hints,
             preferred_frame=job.preferred_frame,
             click_recoveries=job.click_recoveries,
@@ -139,9 +151,34 @@ async def _discover(
                 job,
                 trace_ref=(evidence.directory / "trace.jsonl").as_posix(),
             )
-            output = Path("capabilities") / f"{job.capability_id}.json"
-            save_capability(capability, output)
-            typer.echo(f"compiled {output}")
+            qualification_evidence = EvidenceWriter(
+                kind="qualification",
+                goal=job.goal,
+                target=job.target,
+                model=None,
+                redactor=redactor,
+            )
+            qualification_surface = await launch_browser(headless=True)
+            try:
+                qualification = await ReplayEngine(
+                    surface=qualification_surface,
+                    policy=PolicyEngine.load(),
+                    evidence=qualification_evidence,
+                    allow_mutating=allow_mutating,
+                    allow_draft=True,
+                ).run(capability, inputs)
+                qualification_evidence.write_json("result.json", qualification)
+                qualification_status = qualification.status
+            finally:
+                await qualification_surface.close()
+            if qualification.status == "success":
+                output = Path("capabilities") / f"{job.capability_id}.json"
+                save_capability(capability, output)
+                typer.echo(f"qualified and compiled {output}")
+            else:
+                typer.echo(
+                    "fresh-session qualification failed; capability was not published"
+                )
         typer.echo(
             json.dumps(
                 redactor.data(
@@ -149,6 +186,7 @@ async def _discover(
                         "status": result.status,
                         "stop_reason": result.recording.stop_reason,
                         "llm_calls": result.llm_calls,
+                        "qualification_status": qualification_status,
                         "evidence": str(evidence.directory),
                     }
                 ),
@@ -234,16 +272,12 @@ async def _replay(
         redactor=redactor,
     )
     surface = await launch_browser(headless=headless)
-    coordinator = HandoffCoordinator(surface, event_sink=evidence.event) if handoff_enabled else None
+    coordinator = (
+        HandoffCoordinator(surface, event_sink=evidence.event)
+        if handoff_enabled
+        else None
+    )
     try:
-        if fault:
-            await surface.act(
-                "navigate", value=capability.compatibility.surface.entry_point
-            )
-            await surface.page.evaluate(
-                "(fault) => sessionStorage.setItem('night-window:fault', fault)",
-                fault,
-            )
         engine = ReplayEngine(
             surface=surface,
             policy=PolicyEngine.load(),
@@ -252,10 +286,28 @@ async def _replay(
             allow_mutating=allow_mutating,
             allow_draft=allow_draft,
         )
-        result = await engine.run(capability, inputs, navigate=not fault)
-        if result.status == "escalated" and coordinator and not headless:
+        if fault:
+            blocked = await engine.open_entry(capability, inputs)
+            if blocked is not None:
+                typer.echo(json.dumps(blocked.model_dump(mode="json"), indent=2))
+                typer.echo(f"evidence: {evidence.directory}")
+                return
+            await surface.page.evaluate(
+                "(fault) => sessionStorage.setItem('night-window:fault', fault)",
+                fault,
+            )
+
+        async def on_escalated(result) -> None:
+            assert coordinator is not None
             await _headed_return(coordinator, result.intervention_id)
-            result = await engine.continue_after_handoff(capability, inputs)
+
+        result = await engine.run(
+            capability,
+            inputs,
+            navigate=not fault,
+            wait_for_operator=bool(coordinator) and not headless,
+            on_escalated=on_escalated if coordinator and not headless else None,
+        )
         typer.echo(json.dumps(result.model_dump(mode="json"), indent=2))
         typer.echo(f"evidence: {evidence.directory}")
     finally:

@@ -46,6 +46,8 @@ async def discover(
             ScriptedModel(flow),
             POLICY,
             max_steps=job.max_steps,
+            timeout_seconds=job.discovery_timeout_seconds,
+            max_no_progress_steps=job.max_no_progress_steps,
             event_sink=writer.event,
             confirmed_risks={Risk.MUTATING},
         ).run(
@@ -54,6 +56,10 @@ async def discover(
             inputs=inputs,
             input_names=list(job.inputs),
             required_outputs=list(job.outputs),
+            input_definitions=job.inputs,
+            output_definitions=job.outputs,
+            business_outcomes=job.business_outcomes,
+            fatal_states=job.fatal_states,
             hints=job.discovery_hints,
             preferred_frame=job.preferred_frame,
             click_recoveries=job.click_recoveries,
@@ -167,7 +173,9 @@ async def main() -> None:
     northbay = apply_tenant(read_capability, find_profile("northbay"))
     await replay("read-replay-northbay", read_job, northbay, read_inputs)
     drifted = read_capability.model_copy(deep=True)
-    drifted.compatibility.surface.entry_point = northbay.compatibility.surface.entry_point
+    drifted.compatibility.surface.entry_point = (
+        northbay.compatibility.surface.entry_point
+    )
     await replay("read-replay-northbay-drift", read_job, drifted, read_inputs)
 
     open_inputs = {
@@ -194,4 +202,3 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
-
