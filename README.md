@@ -301,7 +301,6 @@ Tests use a scripted decision model but still drive the real local UI. They do n
 
 ## Design influences
 
-- [YYukin0/interface](https://github.com/YYukin0/interface) is a useful comparison for presenting a discover -> typed capability -> deterministic replay system honestly, with implementation status and explicit cuts.
 - [browser-use/workflow-use](https://github.com/browser-use/workflow-use) uses the same broad record/generate-once and execute-without-AI premise. Pigeonhole is more conservative at replay time: it surfaces ambiguity rather than silently self-healing with an LLM.
 - [Microsoft FSQ](https://github.com/microsoft/FSQ) is a strong example of the evidence-first distinction between dynamic exploration and strict replay, and of a common harness vocabulary across UI platforms.
 - [Playwright locator guidance](https://playwright.dev/docs/locators), [actionability checks](https://playwright.dev/docs/actionability), and [frame support](https://playwright.dev/docs/frames) motivate user-facing semantic locators, bounded waiting, and explicit frame identity.
