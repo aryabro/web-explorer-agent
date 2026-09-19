@@ -7,11 +7,17 @@ import time
 import pytest
 import uvicorn
 
+from pigeonhole.policy import PolicyEngine
 from target.server import app
 
 
-@pytest.fixture(scope="session", autouse=True)
-def night_window_server():
+@pytest.fixture
+def policy() -> PolicyEngine:
+    return PolicyEngine.load("policy.yaml")
+
+
+@pytest.fixture(scope="session")
+def test_bank_server():
     with socket.socket() as client:
         if client.connect_ex(("127.0.0.1", 8765)) == 0:
             yield

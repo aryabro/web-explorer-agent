@@ -15,11 +15,6 @@ from pigeonhole.surface.base import ControlObservation, Observation
 from pigeonhole.tenants import apply_tenant, compatibility_fingerprint, find_profile
 
 
-@pytest.fixture
-def policy() -> PolicyEngine:
-    return PolicyEngine.load("policy.yaml")
-
-
 class RecordingSurface:
     def __init__(self, observation: Observation | None = None) -> None:
         self.actions: list[tuple] = []
@@ -50,7 +45,6 @@ class RecordingSurface:
 
     async def act(self, action: str, ref: str | None = None, value=None):
         self.actions.append((action, ref, value))
-        return None
 
     async def observe(self) -> Observation:
         return self.observation

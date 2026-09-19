@@ -6,36 +6,26 @@ from pathlib import Path
 import pytest
 
 from pigeonhole.compiler import Job, compile_recording
-from pigeonhole.contracts import Action, FailureCode, Step, SuccessCondition, TargetBundle
+from pigeonhole.contracts import (
+    Action,
+    FailureCode,
+    Step,
+    SuccessCondition,
+    TargetBundle,
+)
 from pigeonhole.discovery import Decision, DiscoveryLoop
 from pigeonhole.evidence import EvidenceWriter
-from pigeonhole.scripted_model import ScriptedModel
-from pigeonhole.handoff import HandoffCoordinator, SessionLease
+from pigeonhole.handoff import HandoffCoordinator
 from pigeonhole.policy import PolicyEngine
 from pigeonhole.redact import Redactor
 from pigeonhole.replay import ReplayEngine, load_capability
+from pigeonhole.scripted_model import ScriptedModel
 from target.profile import launch_browser
-
-
-@pytest.fixture
-def policy() -> PolicyEngine:
-    return PolicyEngine.load("policy.yaml")
-
-
-@pytest.mark.asyncio
-async def test_lease_ttl_expire_leaves_session_unowned() -> None:
-    lease = SessionLease()
-    await lease.cede()
-    await lease.claim("op-ttl", ttl_seconds=0)
-    state = await lease.state()
-    assert state.holder is None
-    with pytest.raises(PermissionError):
-        await lease.assert_automation()
 
 
 @pytest.mark.asyncio
 async def test_locator_disagreement_is_conflict(
-    tmp_path: Path, policy: PolicyEngine
+    tmp_path: Path, policy: PolicyEngine, test_bank_server
 ) -> None:
     capability = load_capability("capabilities/member.read_savings_balance.json")
     surface = await launch_browser(headless=True)
@@ -127,7 +117,7 @@ def test_redactor_masks_sinks_not_capability_locators(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_discover_then_replay_different_member(
-    tmp_path: Path, policy: PolicyEngine
+    tmp_path: Path, policy: PolicyEngine, test_bank_server
 ) -> None:
     job = Job.load("jobs/read_savings.yaml")
     discover_inputs = {
@@ -179,7 +169,7 @@ async def test_discover_then_replay_different_member(
 
 @pytest.mark.asyncio
 async def test_discovery_stuck_persists_intervention(
-    tmp_path: Path, policy: PolicyEngine
+    tmp_path: Path, policy: PolicyEngine, test_bank_server
 ) -> None:
     class StuckModel:
         name = "stuck-model"

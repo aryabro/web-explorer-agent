@@ -6,21 +6,48 @@ from pathlib import Path
 import pytest
 
 from pigeonhole.compiler import Job
-from pigeonhole.contracts import Recovery
+from pigeonhole.contracts import (
+    EscalatedResult,
+    FailureResult,
+    OutcomeResult,
+    Recovery,
+    SuccessResult,
+)
 from pigeonhole.surface.base import SurfaceResolutionError
 from pigeonhole.surface.resolution import vote_identities
 
+SOURCE_ROOT = Path("src")
+
+
+def _import_closure(module: str) -> set[str]:
+    """Return imports reachable through local pigeonhole modules."""
+    pending = [module]
+    visited: set[str] = set()
+    imported: set[str] = set()
+    while pending:
+        current = pending.pop()
+        if current in visited:
+            continue
+        visited.add(current)
+        path = SOURCE_ROOT.joinpath(*current.split(".")).with_suffix(".py")
+        if not path.is_file():
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            names: list[str] = []
+            if isinstance(node, ast.Import):
+                names.extend(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                names.append(node.module)
+            imported.update(names)
+            pending.extend(name for name in names if name.startswith("pigeonhole."))
+    return imported
+
 
 def test_replay_module_has_no_llm_or_discovery_dependency() -> None:
-    source = Path("src/pigeonhole/replay.py").read_text(encoding="utf-8")
-    tree = ast.parse(source)
-    imported: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            imported.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            imported.add(node.module)
-    forbidden = {
+    imported = _import_closure("pigeonhole.replay")
+    forbidden_prefixes = {
+        "pigeonhole.config",
         "pigeonhole.discovery",
         "pigeonhole.scripted_model",
         "openai",
@@ -28,15 +55,25 @@ def test_replay_module_has_no_llm_or_discovery_dependency() -> None:
         "anthropic",
         "google.generativeai",
     }
-    assert imported.isdisjoint(forbidden)
-    assert "OpenAICompatibleModel" not in source
-    assert "LLMConfig" not in source
-    assert "llm_calls=" not in source
-    contracts = Path("src/pigeonhole/contracts.py").read_text(encoding="utf-8")
-    assert "llm_calls: Literal[0]" in contracts
-    from pigeonhole.contracts import SuccessResult
+    violations = {
+        name
+        for name in imported
+        if any(
+            name == prefix or name.startswith(f"{prefix}.")
+            for prefix in forbidden_prefixes
+        )
+    }
+    assert not violations
 
-    assert SuccessResult(outputs={}, completed_steps=[]).llm_calls == 0
+    for result_type in (
+        SuccessResult,
+        OutcomeResult,
+        FailureResult,
+        EscalatedResult,
+    ):
+        field = result_type.model_fields["llm_calls"]
+        assert field.default == 0
+        assert str(field.annotation) == "typing.Literal[0]"
 
 
 def test_vote_identities_agreement_and_conflict() -> None:

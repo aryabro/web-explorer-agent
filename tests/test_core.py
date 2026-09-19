@@ -12,98 +12,15 @@ from pigeonhole.contracts import (
     Risk,
     Sensitivity,
 )
-from pigeonhole.discovery import Decision, DiscoveryLoop
+from pigeonhole.discovery import DiscoveryLoop
 from pigeonhole.evidence import EvidenceWriter
-from pigeonhole.scripted_model import ScriptedModel
 from pigeonhole.handoff import HandoffCoordinator, SessionLease
 from pigeonhole.policy import PolicyEngine
 from pigeonhole.redact import Redactor
 from pigeonhole.replay import ReplayEngine, load_capability
+from pigeonhole.scripted_model import ScriptedModel
 from pigeonhole.tenants import apply_tenant, find_profile
 from target.profile import launch_browser
-
-
-class ScriptedLookupModel:
-    name = "scripted-test-model"
-
-    def __init__(self) -> None:
-        self.turn = 0
-
-    async def decide(self, prompt: str) -> Decision:
-        state = json.loads(prompt)
-        controls = state["observation"]["controls"]
-
-        def ref(*phrases: str, element_type: str | None = None) -> str:
-            for control in controls:
-                haystack = (
-                    f"{control['nearby_text']} {control['visible_text']} "
-                    f"{control.get('accessible_name') or ''}"
-                )
-                if all(phrase in haystack for phrase in phrases) and (
-                    element_type is None or control["element_type"] == element_type
-                ):
-                    return control["ref"]
-            raise AssertionError(f"control not found for {phrases}: {controls}")
-
-        if self.turn == 0:
-            decision = Decision(
-                kind="act",
-                intent="Enter the runtime employee identifier",
-                action="type",
-                ref=ref("Employee ID", element_type="input"),
-                input_name="operator_id",
-            )
-        elif self.turn == 1:
-            decision = Decision(
-                kind="act",
-                intent="Enter the runtime-only security PIN",
-                action="type",
-                ref=ref("Security PIN", element_type="input"),
-                input_name="pin",
-            )
-        elif self.turn == 2:
-            decision = Decision(
-                kind="act",
-                intent="Sign in to the test bank console",
-                action="click",
-                ref=ref("Sign in", element_type="button"),
-                checkpoint_text="Member search",
-            )
-        elif self.turn == 3:
-            decision = Decision(
-                kind="act",
-                intent="Enter the requested member number",
-                action="type",
-                ref=ref("Member number", element_type="input"),
-                input_name="member_id",
-            )
-        elif self.turn == 4:
-            decision = Decision(
-                kind="act",
-                intent="Open the matching member profile",
-                action="click",
-                ref=ref("Search members", element_type="button"),
-                checkpoint_text="MEMBER PROFILE READY",
-            )
-        elif self.turn == 5:
-            decision = Decision(
-                kind="act",
-                intent="Read the visible current savings balance",
-                action="extract",
-                ref=ref("Current savings", element_type="strong"),
-                output="savings_balance",
-            )
-        else:
-            decision = Decision(
-                kind="done", intent="The visible savings balance was extracted"
-            )
-        self.turn += 1
-        return decision
-
-
-@pytest.fixture
-def policy() -> PolicyEngine:
-    return PolicyEngine.load("policy.yaml")
 
 
 async def _compile_read_savings(policy: PolicyEngine):
@@ -112,7 +29,7 @@ async def _compile_read_savings(policy: PolicyEngine):
     surface = await launch_browser(headless=True)
     try:
         result = await DiscoveryLoop(
-            surface, ScriptedLookupModel(), policy, max_steps=job.max_steps
+            surface, ScriptedModel("read"), policy, max_steps=job.max_steps
         ).run(
             goal=job.goal,
             target=job.target,
@@ -241,7 +158,7 @@ async def test_control_lease_is_fail_closed() -> None:
 
 @pytest.mark.asyncio
 async def test_discovery_compile_and_replay_real_ui(
-    tmp_path: Path, policy: PolicyEngine
+    tmp_path: Path, policy: PolicyEngine, test_bank_server
 ) -> None:
     inputs = {"operator_id": "teller7", "pin": "1937", "member_id": "12345"}
     job = Job.load("jobs/read_savings.yaml")
@@ -251,13 +168,13 @@ async def test_discovery_compile_and_replay_real_ui(
             kind="test-discovery",
             goal=job.goal,
             target=job.target,
-            model=ScriptedLookupModel.name,
+            model=ScriptedModel.name,
             redactor=Redactor(["1937", "12345"]),
             root=tmp_path,
         )
         result = await DiscoveryLoop(
             discovery_surface,
-            ScriptedLookupModel(),
+            ScriptedModel("read"),
             policy,
             max_steps=job.max_steps,
             event_sink=discovery_evidence.event,
@@ -327,14 +244,14 @@ async def test_discovery_compile_and_replay_real_ui(
 
 @pytest.mark.asyncio
 async def test_business_outcome_and_interstitial_recovery(
-    tmp_path: Path, policy: PolicyEngine
+    tmp_path: Path, policy: PolicyEngine, test_bank_server
 ) -> None:
     job = Job.load("jobs/read_savings.yaml")
     inputs = {"operator_id": "teller7", "pin": "1937", "member_id": "12345"}
     discover = await launch_browser(headless=True)
     try:
         result = await DiscoveryLoop(
-            discover, ScriptedLookupModel(), policy, max_steps=job.max_steps
+            discover, ScriptedModel("read"), policy, max_steps=job.max_steps
         ).run(
             goal=job.goal,
             target=job.target,
@@ -382,7 +299,7 @@ async def test_business_outcome_and_interstitial_recovery(
 
 @pytest.mark.asyncio
 async def test_mutating_flow_uses_ui_success_and_storage_oracle(
-    tmp_path: Path, policy: PolicyEngine
+    tmp_path: Path, policy: PolicyEngine, test_bank_server
 ) -> None:
     job = Job.load("jobs/open_sub_account.yaml")
     inputs = {
@@ -451,7 +368,7 @@ async def test_mutating_flow_uses_ui_success_and_storage_oracle(
 
 @pytest.mark.asyncio
 async def test_same_session_handoff_and_checkpoint_resume(
-    tmp_path: Path, policy: PolicyEngine
+    tmp_path: Path, policy: PolicyEngine, test_bank_server
 ) -> None:
     capability, inputs = await _compile_read_savings(policy)
     surface = await launch_browser(headless=True)
@@ -569,7 +486,7 @@ def test_catalog_lists_and_emits_tool_defs() -> None:
 
 @pytest.mark.asyncio
 async def test_northbay_override_replays_and_bare_tenant_drifts(
-    tmp_path: Path, policy: PolicyEngine
+    tmp_path: Path, policy: PolicyEngine, test_bank_server
 ) -> None:
     capability, inputs = await _compile_read_savings(policy)
     profile = find_profile("northbay")
