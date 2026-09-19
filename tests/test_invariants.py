@@ -9,7 +9,7 @@ from pigeonhole.compiler import Job, compile_recording
 from pigeonhole.contracts import Action, FailureCode, Step, SuccessCondition, TargetBundle
 from pigeonhole.discovery import Decision, DiscoveryLoop
 from pigeonhole.evidence import EvidenceWriter
-from pigeonhole.fixture_model import ScriptedModel
+from pigeonhole.scripted_model import ScriptedModel
 from pigeonhole.handoff import HandoffCoordinator, SessionLease
 from pigeonhole.policy import PolicyEngine
 from pigeonhole.redact import Redactor

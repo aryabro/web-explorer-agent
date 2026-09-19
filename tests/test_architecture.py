@@ -22,7 +22,7 @@ def test_replay_module_has_no_llm_or_discovery_dependency() -> None:
             imported.add(node.module)
     forbidden = {
         "pigeonhole.discovery",
-        "pigeonhole.fixture_model",
+        "pigeonhole.scripted_model",
         "openai",
         "httpx",
         "anthropic",

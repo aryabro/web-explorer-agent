@@ -14,7 +14,7 @@ from pigeonhole.contracts import (
 )
 from pigeonhole.discovery import Decision, DiscoveryLoop
 from pigeonhole.evidence import EvidenceWriter
-from pigeonhole.fixture_model import ScriptedModel
+from pigeonhole.scripted_model import ScriptedModel
 from pigeonhole.handoff import HandoffCoordinator, SessionLease
 from pigeonhole.policy import PolicyEngine
 from pigeonhole.redact import Redactor
@@ -24,7 +24,7 @@ from target.profile import launch_browser
 
 
 class ScriptedLookupModel:
-    name = "fixture-model-not-submission-evidence"
+    name = "scripted-test-model"
 
     def __init__(self) -> None:
         self.turn = 0

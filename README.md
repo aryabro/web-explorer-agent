@@ -12,7 +12,7 @@ natural-language goal
   COMPILER ----------- typed capability JSON (draft)
         |
         v
-  QUALIFICATION ------- fresh browser session, no LLM
+  FRESH-SESSION VALIDATION (qualification, no LLM)
         |
         v
   REPLAY (no LLM) ----- success | outcome | failure | escalated
@@ -101,6 +101,8 @@ python -m pigeonhole.cli discover \
 ```
 
 PowerShell accepts the command on one line, or with backticks instead of `\`. Discovery drives the UI, writes a run under `evidence/`, compiles a draft capability, and immediately qualifies it in a fresh browser session. The file is published to `capabilities/` only if qualification succeeds.
+
+Qualification is the candidate capability's first deterministic replay in a new browser. It is intentionally separate from discovery so stale cookies, navigation state, or other discovery-session residue cannot make a broken artifact appear valid. It makes no model calls and is retained as a publication gate.
 
 ### 3. Replay without a model
 
@@ -236,22 +238,9 @@ python -m pigeonhole.cli call --id member.read_savings_balance --input member_id
 
 `tools` projects capability inputs into OpenAI-style function definitions. The catalog is deliberately a local file scan, not a network service.
 
-## Mutating capability
+## Mutating workflow coverage
 
-Opening a sub-account is classified as mutating and requires explicit runtime confirmation:
-
-```bash
-python -m pigeonhole.cli replay \
-  --capability capabilities/member.open_sub_account.json \
-  --input member_id=12345 \
-  --input product="Holiday Savings" \
-  --input nickname="Trip" \
-  --input opening_deposit=10.00 \
-  --allow-mutating \
-  --allow-draft
-```
-
-This capability is useful for testing policy behavior; the primary submitted discovery evidence is the read-savings capability.
+[`jobs/open_sub_account.yaml`](jobs/open_sub_account.yaml) defines the mutating example. The browser-backed test compiles and replays it with an independent storage oracle, proving that mutation requires `--allow-mutating` and occurs exactly once. A compiled copy is not committed because the previous one came from a scripted development run whose evidence was removed; submitted capability artifacts are now limited to genuine discovery.
 
 ## Evidence included in this repository
 
@@ -275,9 +264,12 @@ Evidence outputs are intentionally redacted, so the caller may receive a value t
 
 ```bash
 python -m pytest
+python scripts/validate_repository.py
 ```
 
-The suite currently collects 37 tests. Important coverage includes real-browser discovery/compile/replay, outcome and recovery paths, mutating policy, locator conflict, stale observation refs, compiler invariants, tenant overlays, draft approval, redaction, lease expiry, capture failure during hand-back, and same-session checkpoint resume.
+The suite currently collects 37 tests. Important coverage includes real-browser discovery/compile/replay, outcome and recovery paths, mutating policy, locator conflict, stale observation refs, compiler invariants, tenant overlays, draft approval, redaction, lease expiry, capture failure during hand-back, and same-session checkpoint resume. The repository validator separately checks committed capability schemas, provenance paths, evidence JSON/JSONL, run-directory identities, job definitions, and catalog freshness.
+
+GitHub Actions runs the validator and the complete suite with Playwright Chromium on Python 3.12. Docker is intentionally not required: tests start the local FastAPI target in-process, while the automation controls a runner-local browser. Containerizing either side would add networking and browser-handoff complexity without strengthening the boundary under test.
 
 Tests use a scripted decision model but still drive the real local UI. They do not replace the committed genuine discovery run.
 

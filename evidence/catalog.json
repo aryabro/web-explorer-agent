@@ -1,29 +1,6 @@
 {
   "capabilities": [
     {
-      "id": "member.open_sub_account",
-      "version": "1.0.0",
-      "title": "Open a member sub-account",
-      "path": "capabilities/member.open_sub_account.json",
-      "approval": "draft",
-      "tenant": "training-bay-17",
-      "inputs": [
-        "operator_id",
-        "pin",
-        "member_id",
-        "product",
-        "nickname",
-        "opening_deposit"
-      ],
-      "outputs": [
-        "account_id"
-      ],
-      "outcomes": [
-        "MEMBER_NOT_FOUND",
-        "PERMISSION_DENIED"
-      ]
-    },
-    {
       "id": "member.read_savings_balance",
       "version": "1.0.0",
       "title": "Read a member's savings balance",
@@ -48,50 +25,8 @@
     {
       "type": "function",
       "function": {
-        "name": "member_open_sub_account",
-        "description": "Signs in, opens a member jacket, reviews a new savings card, and creates it after confirmation.",
-        "parameters": {
-          "type": "object",
-          "properties": {
-            "operator_id": {
-              "type": "string",
-              "description": "Runtime teller/operator identifier."
-            },
-            "pin": {
-              "type": "string",
-              "description": "Runtime-only sign-on PIN."
-            },
-            "member_id": {
-              "type": "string",
-              "description": "Five-digit fictional member number."
-            },
-            "product": {
-              "type": "string",
-              "description": "Savings product label displayed in the product list."
-            },
-            "nickname": {
-              "type": "string",
-              "description": "Nickname for the new account."
-            },
-            "opening_deposit": {
-              "type": "string",
-              "description": "Decimal opening deposit."
-            }
-          },
-          "required": [
-            "member_id",
-            "product",
-            "nickname",
-            "opening_deposit"
-          ]
-        }
-      }
-    },
-    {
-      "type": "function",
-      "function": {
         "name": "member_read_savings_balance",
-        "description": "Signs into Night Window, opens a member jacket, and returns the visible current savings balance.",
+        "description": "Signs into Test Bank Operations, opens a member profile, and returns the visible current savings balance.",
         "parameters": {
           "type": "object",
           "properties": {

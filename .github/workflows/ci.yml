@@ -3,19 +3,41 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONUNBUFFERED: "1"
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
       - name: Install package
-        run: pip install -e ".[dev]"
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
       - name: Install Chromium
         run: python -m playwright install chromium --with-deps
+
+      - name: Validate committed artifacts and evidence
+        run: python scripts/validate_repository.py
+
       - name: Run tests
-        run: pytest
-        working-directory: ${{ github.workspace }}
+        run: python -m pytest -p no:cacheprovider

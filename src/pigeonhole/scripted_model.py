@@ -1,7 +1,4 @@
-"""Deterministic test models.
-
-These exercise the real browser loop but are never valid submission evidence.
-"""
+"""Deterministic decision model used only by browser-backed tests."""
 
 from __future__ import annotations
 
@@ -12,7 +9,7 @@ from pigeonhole.discovery import Decision
 
 
 class ScriptedModel:
-    name = "fixture-model-not-submission-evidence"
+    name = "scripted-test-model"
 
     def __init__(self, flow: str = "read") -> None:
         self.flow = flow
@@ -32,7 +29,9 @@ class ScriptedModel:
                 )
                 if text in haystack and control["element_type"] == element_type:
                     return control["ref"]
-            raise RuntimeError(f"fixture could not find {element_type} near {text!r}")
+            raise RuntimeError(
+                f"scripted model could not find {element_type} near {text!r}"
+            )
 
         common = [
             Decision(
