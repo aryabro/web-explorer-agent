@@ -4,15 +4,15 @@ from pathlib import Path
 
 import pytest
 
-from pigeonhole.contracts import BoundingBox, Risk
-from pigeonhole.discovery import Decision, DiscoveryLoop
-from pigeonhole.evidence import EvidenceWriter
-from pigeonhole.handoff import SessionLease
-from pigeonhole.policy import PolicyEngine
-from pigeonhole.redact import Redactor
-from pigeonhole.replay import ExecutionState, ReplayEngine, load_capability
-from pigeonhole.surface.base import ControlObservation, Observation
-from pigeonhole.tenants import apply_tenant, compatibility_fingerprint, find_profile
+from web_explorer.contracts import BoundingBox, Risk
+from web_explorer.discovery import Decision, DiscoveryLoop
+from web_explorer.evidence import EvidenceWriter
+from web_explorer.handoff import SessionLease
+from web_explorer.policy import PolicyEngine
+from web_explorer.redact import Redactor
+from web_explorer.replay import ExecutionState, ReplayEngine, load_capability
+from web_explorer.surface.base import ControlObservation, Observation
+from web_explorer.tenants import apply_tenant, compatibility_fingerprint, find_profile
 
 
 class RecordingSurface:

@@ -1,6 +1,6 @@
 # Evidence Guide
 
-This directory contains the redacted, inspectable proof for Pigeonhole's end-to-end path:
+This directory contains the redacted, inspectable proof for Web Explorer's end-to-end path:
 
 ```text
 genuine LLM discovery

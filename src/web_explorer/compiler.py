@@ -5,7 +5,7 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
-from pigeonhole.contracts import (
+from web_explorer.contracts import (
     Approval,
     BusinessOutcome,
     Capability,
@@ -24,8 +24,8 @@ from pigeonhole.contracts import (
     TargetBundle,
     TenantOverrides,
 )
-from pigeonhole.discovery import Recording
-from pigeonhole.tenants import compatibility_fingerprint
+from web_explorer.discovery import Recording
+from web_explorer.tenants import compatibility_fingerprint
 
 
 class Job(BaseModel):
@@ -65,7 +65,7 @@ def compile_recording(
     job: Job,
     *,
     trace_ref: str,
-    compiler_version: str = "pigeonhole-0.1.0",
+    compiler_version: str = "web-explorer-0.1.0",
 ) -> Capability:
     if not recording.success:
         raise ValueError(

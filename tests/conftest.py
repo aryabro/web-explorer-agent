@@ -7,7 +7,7 @@ from urllib.request import urlopen
 import pytest
 import uvicorn
 
-from pigeonhole.policy import PolicyEngine
+from web_explorer.policy import PolicyEngine
 from target.server import app
 
 TARGET_URL = "http://127.0.0.1:8765/"

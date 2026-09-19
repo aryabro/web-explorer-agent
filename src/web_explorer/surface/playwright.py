@@ -11,13 +11,14 @@ from urllib.parse import urlparse
 from playwright.async_api import (
     Browser,
     BrowserContext,
+    Error as PlaywrightError,
     Frame,
     Locator,
     Page,
     async_playwright,
 )
 
-from pigeonhole.contracts import (
+from web_explorer.contracts import (
     Checkpoint,
     GeometryTarget,
     Recovery,
@@ -25,17 +26,17 @@ from pigeonhole.contracts import (
     StructuralTarget,
     TargetBundle,
 )
-from pigeonhole.surface.base import (
+from web_explorer.surface.base import (
     FrameObservation,
     Observation,
     SurfaceResolutionError,
 )
-from pigeonhole.surface.perception import (
+from web_explorer.surface.perception import (
     assemble_observation,
     control_from_snapshot,
     harvest_target,
 )
-from pigeonhole.surface.resolution import vote_identities
+from web_explorer.surface.resolution import vote_identities
 
 
 @dataclass
@@ -59,6 +60,7 @@ class PlaywrightSurface:
         *,
         skip_frames: Sequence[str] = (),
         cover_frames: Sequence[str] = (),
+        preferred_frame: str | None = None,
     ) -> None:
         self.page = page
         self.context = context
@@ -66,6 +68,7 @@ class PlaywrightSurface:
         self._playwright = playwright
         self._skip_frames = frozenset(skip_frames)
         self._cover_frames = frozenset(cover_frames)
+        self._preferred_frame = preferred_frame
         self._refs: dict[str, tuple[Frame, int, dict[str, Any]]] = {}
         self._observation_sequence = 0
         self._paused = asyncio.Event()
@@ -79,6 +82,7 @@ class PlaywrightSurface:
         headless: bool = True,
         skip_frames: Sequence[str] = (),
         cover_frames: Sequence[str] = (),
+        preferred_frame: str | None = None,
     ) -> "PlaywrightSurface":
         playwright = await async_playwright().start()
         launch_options: dict[str, Any] = {"headless": headless}
@@ -118,6 +122,7 @@ class PlaywrightSurface:
             playwright,
             skip_frames=skip_frames,
             cover_frames=cover_frames,
+            preferred_frame=preferred_frame,
         )
         context.on("page", surface._adopt_page)
         return surface
@@ -145,24 +150,54 @@ class PlaywrightSurface:
         """Wait until the live page exposes at least one usable control.
 
         SPAs often fire `load` before hydrating; discovery must not observe an
-        empty shell or the model will invent refs.
+        empty shell or the model will invent refs. When a configured work frame
+        exists, it must become ready; an earlier navigation/sidebar frame must
+        not make the whole surface appear ready.
         """
         deadline = asyncio.get_running_loop().time() + timeout_ms / 1000
         while asyncio.get_running_loop().time() < deadline:
-            try:
-                ready = await self.page.evaluate(
-                    """() => {
-                      const body = document.body;
-                      if (!body || !(body.innerText || '').trim()) return false;
-                      return Boolean(
-                        body.querySelector(
-                          'input,textarea,select,button,a,[role="button"],[role="textbox"],[role="combobox"]'
-                        )
+            preferred = (
+                self._find_frame(self._preferred_frame)
+                if self._preferred_frame
+                else None
+            )
+            frames = (
+                [preferred]
+                if preferred is not None
+                else [
+                    frame
+                    for frame in self.page.frames
+                    if self._frame_key(frame) not in self._skip_frames
+                ]
+            )
+            ready = False
+            for frame in frames:
+                try:
+                    ready = bool(
+                        await frame.evaluate(
+                            """() => {
+                      if (document.readyState === 'loading') return false;
+                      const root = document.body || document.documentElement;
+                      if (!root) return false;
+                      const controls = root.querySelectorAll(
+                        'input,textarea,select,button,a,[role="button"],[role="textbox"],[role="combobox"]'
                       );
+                      return [...controls].some(el => {
+                        const style = getComputedStyle(el);
+                        const box = el.getBoundingClientRect();
+                        return style.visibility !== 'hidden' &&
+                          style.display !== 'none' &&
+                          box.width > 0 && box.height > 0 &&
+                          !el.disabled && el.getAttribute('aria-disabled') !== 'true';
+                      });
                     }"""
-                )
-            except Exception:
-                ready = False
+                        )
+                    )
+                except PlaywrightError:
+                    # Frames can detach or navigate while readiness is sampled.
+                    ready = False
+                if ready:
+                    break
             if ready:
                 await self._await_settle()
                 return
@@ -400,10 +435,10 @@ class PlaywrightSurface:
         try:
             return await locator.evaluate(
                 """el => {
-                  if (!el.__pigeonholeId) {
-                    el.__pigeonholeId = Math.random().toString(36).slice(2);
+                  if (!el.__web_explorerId) {
+                    el.__web_explorerId = Math.random().toString(36).slice(2);
                   }
-                  return el.__pigeonholeId;
+                  return el.__web_explorerId;
                 }"""
             )
         except Exception:
@@ -593,7 +628,7 @@ class PlaywrightSurface:
               el.value = next;
             }
           });
-          window.__pigeonholeRestore = () => changed.forEach(item => {
+          window.__web_explorerRestore = () => changed.forEach(item => {
             if (item.kind === 'text') item.node.nodeValue = item.value;
             else item.node.value = item.value;
           });
@@ -606,7 +641,7 @@ class PlaywrightSurface:
                         await frame.evaluate(
                             """() => {
                               const cover = document.createElement('div');
-                              cover.id = 'pigeonhole-oracle-cover';
+                              cover.id = 'web_explorer-oracle-cover';
                               cover.textContent = 'INTERNAL ORACLE REDACTED';
                               Object.assign(cover.style, {
                                 position: 'fixed', inset: '0', zIndex: '2147483647',
@@ -614,7 +649,7 @@ class PlaywrightSurface:
                                 padding: '20px', fontFamily: 'monospace'
                               });
                               document.documentElement.appendChild(cover);
-                              window.__pigeonholeRestoreDrawer = () => {
+                              window.__web_explorerRestoreDrawer = () => {
                                 cover.remove();
                               };
                             }"""
@@ -629,10 +664,10 @@ class PlaywrightSurface:
                 try:
                     if self._frame_key(frame) in self._cover_frames:
                         await frame.evaluate(
-                            "() => window.__pigeonholeRestoreDrawer?.()"
+                            "() => window.__web_explorerRestoreDrawer?.()"
                         )
                     else:
-                        await frame.evaluate("() => window.__pigeonholeRestore?.()")
+                        await frame.evaluate("() => window.__web_explorerRestore?.()")
                 except Exception:
                     pass
 
@@ -653,11 +688,11 @@ class PlaywrightSurface:
     def _capture_script() -> str:
         return """
         (() => {
-          if (window.__pigeonholeCaptureInstalled) return;
-          window.__pigeonholeCaptureInstalled = true;
+          if (window.__web_explorerCaptureInstalled) return;
+          window.__web_explorerCaptureInstalled = true;
           const save = event => {
-            if (sessionStorage.getItem('pigeonhole:human-control') !== '1') return;
-            const rows = JSON.parse(sessionStorage.getItem('pigeonhole:human-events') || '[]');
+            if (sessionStorage.getItem('web_explorer:human-control') !== '1') return;
+            const rows = JSON.parse(sessionStorage.getItem('web_explorer:human-events') || '[]');
             rows.push({
               at: new Date().toISOString(),
               event: event.type,
@@ -666,7 +701,7 @@ class PlaywrightSurface:
               visible_text: event.type === 'click'
                 ? (event.target?.innerText || '').trim().slice(0, 80) : null
             });
-            sessionStorage.setItem('pigeonhole:human-events', JSON.stringify(rows));
+            sessionStorage.setItem('web_explorer:human-events', JSON.stringify(rows));
           };
           document.addEventListener('click', save, true);
           document.addEventListener('change', save, true);
@@ -677,8 +712,8 @@ class PlaywrightSurface:
         await self.context.add_init_script(self._capture_script())
         await self.page.evaluate(
             """() => {
-              sessionStorage.setItem('pigeonhole:human-events', '[]');
-              sessionStorage.setItem('pigeonhole:human-control', '1');
+              sessionStorage.setItem('web_explorer:human-events', '[]');
+              sessionStorage.setItem('web_explorer:human-control', '1');
             }"""
         )
         for frame in self.page.frames:
@@ -690,8 +725,8 @@ class PlaywrightSurface:
     async def stop_human_capture(self) -> list[dict[str, Any]]:
         rows = await self.page.evaluate(
             """() => {
-              sessionStorage.removeItem('pigeonhole:human-control');
-              return JSON.parse(sessionStorage.getItem('pigeonhole:human-events') || '[]');
+              sessionStorage.removeItem('web_explorer:human-control');
+              return JSON.parse(sessionStorage.getItem('web_explorer:human-events') || '[]');
             }"""
         )
         return rows

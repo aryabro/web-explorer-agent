@@ -8,8 +8,8 @@ from urllib.parse import urlparse
 import yaml
 from pydantic import BaseModel
 
-from pigeonhole.contracts import Risk
-from pigeonhole.surface.base import ControlObservation
+from web_explorer.contracts import Risk
+from web_explorer.surface.base import ControlObservation
 
 
 class PolicyDecision(BaseModel):

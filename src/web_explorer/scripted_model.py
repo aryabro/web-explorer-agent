@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 
-from pigeonhole.contracts import Risk
-from pigeonhole.discovery import Decision
+from web_explorer.contracts import Risk
+from web_explorer.discovery import Decision
 
 
 class ScriptedModel:

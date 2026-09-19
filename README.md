@@ -1,6 +1,6 @@
-# Pigeonhole
+# Web Explorer
 
-Pigeonhole is a discover-once, replay-many computer-use system for legacy applications that do not expose an API. An LLM operates a real browser during discovery. A compiler turns the verified run into a typed, reviewable capability. Production-style replay executes that capability without an LLM and returns one of four explicit results: `success`, `outcome`, `failure`, or `escalated`.
+Web Explorer is a discover-once, replay-many computer-use system for legacy applications that do not expose an API. An LLM operates a real browser during discovery. A compiler turns the verified run into a typed, reviewable capability. Production-style replay executes that capability without an LLM and returns one of four explicit results: `success`, `outcome`, `failure`, or `escalated`.
 
 ```text
 natural-language goal
@@ -94,7 +94,7 @@ The fixture is now available at `http://127.0.0.1:8765`.
 In terminal two:
 
 ```bash
-python -m pigeonhole.cli discover \
+web-explorer discover \
   --job jobs/read_savings.yaml \
   --input member_id=12345 \
   --headed
@@ -107,7 +107,7 @@ Qualification is the candidate capability's first deterministic replay in a new 
 ### 3. Replay without a model
 
 ```bash
-python -m pigeonhole.cli replay \
+web-explorer replay \
   --capability capabilities/member.read_savings_balance.json \
   --input member_id=54321 \
   --allow-draft
@@ -116,7 +116,7 @@ python -m pigeonhole.cli replay \
 The replay output has `llm_calls: 0`. `--allow-draft` is an explicit local-development override. To approve the artifact instead:
 
 ```bash
-python -m pigeonhole.cli approve \
+web-explorer approve \
   --capability capabilities/member.read_savings_balance.json \
   --by reviewer-name
 ```
@@ -125,16 +125,16 @@ python -m pigeonhole.cli approve \
 
 ```bash
 # Declared business outcome, not an automation failure
-python -m pigeonhole.cli replay --capability capabilities/member.read_savings_balance.json --input member_id=00000 --allow-draft
+web-explorer replay --capability capabilities/member.read_savings_balance.json --input member_id=00000 --allow-draft
 
 # Known interstitial: bounded dismiss recovery, then success
-python -m pigeonhole.cli replay --capability capabilities/member.read_savings_balance.json --input member_id=12345 --fault interstitial --allow-draft
+web-explorer replay --capability capabilities/member.read_savings_balance.json --input member_id=12345 --fault interstitial --allow-draft
 
 # Same base capability, second tenant overlay
-python -m pigeonhole.cli replay --capability capabilities/member.read_savings_balance.json --input member_id=12345 --tenant northbay --allow-draft
+web-explorer replay --capability capabilities/member.read_savings_balance.json --input member_id=12345 --tenant northbay --allow-draft
 
 # Session expiry as a typed hard failure
-python -m pigeonhole.cli replay --capability capabilities/member.read_savings_balance.json --input member_id=12345 --fault session_drop --no-handoff --allow-draft
+web-explorer replay --capability capabilities/member.read_savings_balance.json --input member_id=12345 --fault session_drop --no-handoff --allow-draft
 ```
 
 | Scenario | Result |
@@ -149,7 +149,7 @@ python -m pigeonhole.cli replay --capability capabilities/member.read_savings_ba
 ### 5. Exercise live human handoff
 
 ```bash
-python -m pigeonhole.cli replay \
+web-explorer replay \
   --capability capabilities/member.read_savings_balance.json \
   --input member_id=54321 \
   --fault session_drop \
@@ -231,9 +231,9 @@ Each run directory contains a manifest, a redacted JSONL trace, and a structured
 ## Agent-facing catalog
 
 ```bash
-python -m pigeonhole.cli list
-python -m pigeonhole.cli tools
-python -m pigeonhole.cli call --id member.read_savings_balance --input member_id=54321 --allow-draft
+web-explorer list
+web-explorer tools
+web-explorer call --id member.read_savings_balance --input member_id=54321 --allow-draft
 ```
 
 `tools` projects capability inputs into OpenAI-style function definitions. The catalog is deliberately a local file scan, not a network service.
@@ -267,7 +267,7 @@ python -m pytest
 python scripts/validate_repository.py
 ```
 
-The suite currently collects 37 tests. Important coverage includes real-browser discovery/compile/replay, outcome and recovery paths, mutating policy, locator conflict, stale observation refs, compiler invariants, tenant overlays, draft approval, redaction, lease expiry, capture failure during hand-back, and same-session checkpoint resume. The repository validator separately checks committed capability schemas, provenance paths, evidence JSON/JSONL, run-directory identities, job definitions, and catalog freshness.
+The suite currently collects 37 tests. Important coverage includes frame-aware readiness, real-browser discovery/compile/replay, outcome and recovery paths, mutating policy, locator conflict, stale observation refs, compiler invariants, tenant overlays, draft approval, redaction, lease expiry, capture failure during hand-back, and same-session checkpoint resume. The repository validator separately checks committed capability schemas, provenance paths, evidence JSON/JSONL, run-directory identities, job definitions, and catalog freshness.
 
 GitHub Actions runs the validator and the complete suite with Playwright Chromium on Python 3.12. Docker is intentionally not required: tests start the local FastAPI target in-process, while the automation controls a runner-local browser. Containerizing either side would add networking and browser-handoff complexity without strengthening the boundary under test.
 
@@ -277,21 +277,21 @@ Tests use a scripted decision model but still drive the real local UI. They do n
 
 | Path | Responsibility |
 | --- | --- |
-| `src/pigeonhole/contracts.py` | Strict capability schema, result union, risk/sensitivity/failure enums |
-| `src/pigeonhole/discovery.py` | Model tools, typed turn context, discovery loop, completion verification |
-| `src/pigeonhole/compiler.py` | Recording validation and capability construction |
-| `src/pigeonhole/replay.py` | Deterministic executor, error taxonomy, recovery, resume cursor |
-| `src/pigeonhole/surface/base.py` | Surface-neutral protocol and observations |
-| `src/pigeonhole/surface/perception.py` | Observation normalization and target harvesting |
-| `src/pigeonhole/surface/resolution.py` | Surface-neutral identity-voting rule |
-| `src/pigeonhole/surface/playwright.py` | Web/frame adapter, actions, checkpoints, screenshots, human-event capture |
-| `src/pigeonhole/policy.py` | Default-deny location/action/risk decisions |
-| `src/pigeonhole/redact.py` | Exact-value and pattern redaction |
-| `src/pigeonhole/evidence.py` | Run directories and redacted JSON/JSONL sinks |
-| `src/pigeonhole/handoff.py` | Session lease, interventions, operator console, hand-back evidence |
-| `src/pigeonhole/tenants.py` | Sparse tenant specialization and fingerprint updates |
-| `src/pigeonhole/catalog.py` | Local capability discovery and tool projection |
-| `src/pigeonhole/cli.py` | User-facing orchestration commands |
+| `src/web_explorer/contracts.py` | Strict capability schema, result union, risk/sensitivity/failure enums |
+| `src/web_explorer/discovery.py` | Model tools, typed turn context, discovery loop, completion verification |
+| `src/web_explorer/compiler.py` | Recording validation and capability construction |
+| `src/web_explorer/replay.py` | Deterministic executor, error taxonomy, recovery, resume cursor |
+| `src/web_explorer/surface/base.py` | Surface-neutral protocol and observations |
+| `src/web_explorer/surface/perception.py` | Observation normalization and target harvesting |
+| `src/web_explorer/surface/resolution.py` | Surface-neutral identity-voting rule |
+| `src/web_explorer/surface/playwright.py` | Web/frame adapter, actions, checkpoints, screenshots, human-event capture |
+| `src/web_explorer/policy.py` | Default-deny location/action/risk decisions |
+| `src/web_explorer/redact.py` | Exact-value and pattern redaction |
+| `src/web_explorer/evidence.py` | Run directories and redacted JSON/JSONL sinks |
+| `src/web_explorer/handoff.py` | Session lease, interventions, operator console, hand-back evidence |
+| `src/web_explorer/tenants.py` | Sparse tenant specialization and fingerprint updates |
+| `src/web_explorer/catalog.py` | Local capability discovery and tool projection |
+| `src/web_explorer/cli.py` | User-facing orchestration commands |
 | `jobs/` | Discovery contracts and fixture-specific guidance |
 | `capabilities/` | Compiled, versioned capability artifacts |
 | `tenants/` | Tenant-specific sparse overrides |
@@ -299,12 +299,12 @@ Tests use a scripted decision model but still drive the real local UI. They do n
 | `evidence/` | Committed redacted discovery, replay, failure, and handoff runs |
 | `tests/` | Contract, architecture, browser, safety, and handoff tests |
 
-## Design influences
+## References
 
-- [browser-use/workflow-use](https://github.com/browser-use/workflow-use) uses the same broad record/generate-once and execute-without-AI premise. Pigeonhole is more conservative at replay time: it surfaces ambiguity rather than silently self-healing with an LLM.
-- [Microsoft FSQ](https://github.com/microsoft/FSQ) is a strong example of the evidence-first distinction between dynamic exploration and strict replay, and of a common harness vocabulary across UI platforms.
-- [Playwright locator guidance](https://playwright.dev/docs/locators), [actionability checks](https://playwright.dev/docs/actionability), and [frame support](https://playwright.dev/docs/frames) motivate user-facing semantic locators, bounded waiting, and explicit frame identity.
-- [Playwright MCP live demo](https://www.youtube.com/live/CNzg1aPwrKI) illustrates a live browser exposed as bounded model tools. Pigeonhole uses its own narrow tool schema because the artifact compiler needs observation-scoped refs and declared input/output names.
-- [Pydantic models](https://docs.pydantic.dev/latest/concepts/models/) provide the runtime validation used for recordings, capabilities, and replay results.
+The following primary documentation informed the main architecture decisions. See [REPORT.md](REPORT.md) for the resulting trade-offs, limits, and proposed production roadmap.
 
-See [REPORT.md](REPORT.md) for the architectural argument, trade-offs, limits, and proposed production roadmap.
+- **Browser targeting and readiness:** [Playwright locators](https://playwright.dev/python/docs/locators), [auto-waiting and actionability](https://playwright.dev/python/docs/actionability), and [frame handling](https://playwright.dev/python/docs/frames) support semantic targets, bounded readiness checks, and explicit frame identity.
+- **Runtime contracts:** [Pydantic models](https://pydantic.dev/docs/validation/latest/concepts/models/) and [validators](https://pydantic.dev/docs/validation/latest/concepts/validators/) support strict artifact/result schemas and cross-field invariants.
+- **Surface abstraction:** Python's [`Protocol`](https://docs.python.org/3/library/typing.html#typing.Protocol) supports the structural interface that separates workflow semantics from the Playwright adapter.
+- **Bounded model actions:** [OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling) documents the typed tool interface used during discovery; replay does not call a model.
+- **Evidence safety:** The [OWASP Logging Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html) informs event selection, sensitive-data exclusion, and tamper-aware production recommendations.

@@ -5,22 +5,23 @@ from pathlib import Path
 
 import pytest
 
-from pigeonhole.compiler import Job
-from pigeonhole.contracts import (
+from web_explorer.compiler import Job
+from web_explorer.contracts import (
     EscalatedResult,
     FailureResult,
     OutcomeResult,
     Recovery,
     SuccessResult,
 )
-from pigeonhole.surface.base import SurfaceResolutionError
-from pigeonhole.surface.resolution import vote_identities
+from web_explorer.surface.base import SurfaceResolutionError
+from web_explorer.surface.playwright import PlaywrightSurface
+from web_explorer.surface.resolution import vote_identities
 
 SOURCE_ROOT = Path("src")
 
 
 def _import_closure(module: str) -> set[str]:
-    """Return imports reachable through local pigeonhole modules."""
+    """Return imports reachable through local web_explorer modules."""
     pending = [module]
     visited: set[str] = set()
     imported: set[str] = set()
@@ -40,16 +41,16 @@ def _import_closure(module: str) -> set[str]:
             elif isinstance(node, ast.ImportFrom) and node.module:
                 names.append(node.module)
             imported.update(names)
-            pending.extend(name for name in names if name.startswith("pigeonhole."))
+            pending.extend(name for name in names if name.startswith("web_explorer."))
     return imported
 
 
 def test_replay_module_has_no_llm_or_discovery_dependency() -> None:
-    imported = _import_closure("pigeonhole.replay")
+    imported = _import_closure("web_explorer.replay")
     forbidden_prefixes = {
-        "pigeonhole.config",
-        "pigeonhole.discovery",
-        "pigeonhole.scripted_model",
+        "web_explorer.config",
+        "web_explorer.discovery",
+        "web_explorer.scripted_model",
         "openai",
         "httpx",
         "anthropic",
@@ -118,3 +119,54 @@ def test_recovery_legacy_and_structured_shapes() -> None:
     job = Job.load("jobs/read_savings.yaml")
     assert job.click_recoveries[0].strategy == "dismiss"
     assert job.click_recoveries[1].timeout_ms == 3000
+
+
+@pytest.mark.asyncio
+async def test_readiness_waits_for_preferred_work_frame_with_generic_fallback() -> None:
+    class FakeFrame:
+        def __init__(self, name: str, ready_after: int) -> None:
+            self.name = name
+            self.url = f"http://example.test/{name}"
+            self.parent_frame = object()
+            self.ready_after = ready_after
+            self.calls = 0
+
+        async def evaluate(self, _script: str) -> bool:
+            self.calls += 1
+            return self.calls >= self.ready_after
+
+    class FakePage:
+        def __init__(self, frames: list[FakeFrame]) -> None:
+            self.frames = frames
+
+        async def wait_for_load_state(self, *_args, **_kwargs) -> None:
+            return None
+
+    navigation = FakeFrame("navigation", ready_after=1)
+    work = FakeFrame("work", ready_after=2)
+    page = FakePage([navigation, work])
+    surface = PlaywrightSurface(
+        page,  # type: ignore[arg-type]
+        None,  # type: ignore[arg-type]
+        None,  # type: ignore[arg-type]
+        None,
+        preferred_frame="work",
+    )
+
+    await surface._await_interactive(timeout_ms=500)
+
+    assert work.calls == 2
+    assert navigation.calls == 0
+
+    generic = FakeFrame("generic", ready_after=1)
+    fallback = PlaywrightSurface(
+        FakePage([generic]),  # type: ignore[arg-type]
+        None,  # type: ignore[arg-type]
+        None,  # type: ignore[arg-type]
+        None,
+        preferred_frame="missing",
+    )
+
+    await fallback._await_interactive(timeout_ms=100)
+
+    assert generic.calls == 1

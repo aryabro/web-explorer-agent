@@ -11,25 +11,25 @@ from typing import Annotated
 import typer
 import uvicorn
 
-from pigeonhole.catalog import (
+from web_explorer.catalog import (
     find_capability,
     iter_capabilities,
     summarize,
     tool_definitions,
 )
-from pigeonhole.compiler import Job, compile_recording, save_capability
-from pigeonhole.config import LLMConfig, runtime_pin
-from pigeonhole.contracts import Approval, Risk
-from pigeonhole.discovery import DiscoveryLoop, OpenAICompatibleModel
-from pigeonhole.evidence import EvidenceWriter
-from pigeonhole.handoff import HandoffCoordinator
-from pigeonhole.policy import PolicyEngine
-from pigeonhole.redact import Redactor
-from pigeonhole.replay import ReplayEngine, load_capability
-from pigeonhole.tenants import apply_tenant, find_profile
+from web_explorer.compiler import Job, compile_recording, save_capability
+from web_explorer.config import LLMConfig, runtime_pin
+from web_explorer.contracts import Approval, Risk
+from web_explorer.discovery import DiscoveryLoop, OpenAICompatibleModel
+from web_explorer.evidence import EvidenceWriter
+from web_explorer.handoff import HandoffCoordinator
+from web_explorer.policy import PolicyEngine
+from web_explorer.redact import Redactor
+from web_explorer.replay import ReplayEngine, load_capability
+from web_explorer.tenants import apply_tenant, find_profile
 from target.profile import launch_browser
 
-app = typer.Typer(no_args_is_help=True, help="Pigeonhole computer-use automation")
+app = typer.Typer(no_args_is_help=True, help="Web Explorer computer-use automation")
 
 
 def _parse_inputs(values: list[str]) -> dict[str, str]:

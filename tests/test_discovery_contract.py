@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from pigeonhole.contracts import (
+from web_explorer.contracts import (
     Action,
     BoundingBox,
     Checkpoint,
@@ -13,9 +13,9 @@ from pigeonhole.contracts import (
     SemanticTarget,
     TargetBundle,
 )
-from pigeonhole.discovery import Decision, DiscoveryLoop, RecordedStep
-from pigeonhole.policy import PolicyEngine
-from pigeonhole.surface.base import ControlObservation, Observation
+from web_explorer.discovery import Decision, DiscoveryLoop, RecordedStep
+from web_explorer.policy import PolicyEngine
+from web_explorer.surface.base import ControlObservation, Observation
 
 
 class ContractSurface:

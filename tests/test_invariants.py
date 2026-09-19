@@ -5,21 +5,21 @@ from pathlib import Path
 
 import pytest
 
-from pigeonhole.compiler import Job, compile_recording
-from pigeonhole.contracts import (
+from web_explorer.compiler import Job, compile_recording
+from web_explorer.contracts import (
     Action,
     FailureCode,
     Step,
     SuccessCondition,
     TargetBundle,
 )
-from pigeonhole.discovery import Decision, DiscoveryLoop
-from pigeonhole.evidence import EvidenceWriter
-from pigeonhole.handoff import HandoffCoordinator
-from pigeonhole.policy import PolicyEngine
-from pigeonhole.redact import Redactor
-from pigeonhole.replay import ReplayEngine, load_capability
-from pigeonhole.scripted_model import ScriptedModel
+from web_explorer.discovery import Decision, DiscoveryLoop
+from web_explorer.evidence import EvidenceWriter
+from web_explorer.handoff import HandoffCoordinator
+from web_explorer.policy import PolicyEngine
+from web_explorer.redact import Redactor
+from web_explorer.replay import ReplayEngine, load_capability
+from web_explorer.scripted_model import ScriptedModel
 from target.profile import launch_browser
 
 

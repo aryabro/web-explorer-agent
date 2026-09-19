@@ -10,14 +10,14 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
-from pigeonhole.contracts import (
+from web_explorer.contracts import (
     BoundingBox,
     GeometryTarget,
     SemanticTarget,
     StructuralTarget,
     TargetBundle,
 )
-from pigeonhole.surface.base import ControlObservation, FrameObservation, Observation
+from web_explorer.surface.base import ControlObservation, FrameObservation, Observation
 
 
 def control_from_snapshot(

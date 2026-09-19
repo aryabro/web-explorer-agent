@@ -1,6 +1,6 @@
 # Design Report
 
-Pigeonhole implements the assignment’s central idea: an LLM discovers a workflow once, a compiler turns verified behavior into a typed capability, and later executions replay that capability without a model. The system is a focused vertical slice; implemented behavior is tested and unsupported production concerns are listed as cuts.
+Web Explorer implements the assignment’s central idea: an LLM discovers a workflow once, a compiler turns verified behavior into a typed capability, and later executions replay that capability without a model. The system is a focused vertical slice; implemented behavior is tested and unsupported production concerns are listed as cuts.
 
 ## 1. Architecture
 
@@ -88,4 +88,12 @@ The project deliberately omits a desktop adapter, remote co-browsing proxy, work
 
 Next work should prioritize risk: signed governance and immutable evidence; repeated qualification across product versions and tenants; runtime compatibility attestation; then a second surface adapter. Model-assisted repair should remain offline: it may propose a new candidate for review and qualification but must not rewrite a running production replay.
 
-Design choices are informed by [browser-use/workflow-use](https://github.com/browser-use/workflow-use) for discover-once/reuse, [Microsoft FSQ](https://github.com/microsoft/FSQ) for evidence-oriented computer-use evaluation, [Playwright locators and actionability](https://playwright.dev/docs/locators) for semantic targeting and bounded waits, and [Pydantic models](https://docs.pydantic.dev/latest/concepts/models/) for runtime schema enforcement. Pigeonhole’s defining position is that the LLM is useful during first-time ambiguity, while production execution should be typed, policy-controlled, observable, and deterministic.
+Web Explorer’s defining position is that the LLM is useful during first-time ambiguity, while production execution should be typed, policy-controlled, observable, and deterministic.
+
+References supporting these decisions:
+
+- [Playwright locators](https://playwright.dev/python/docs/locators), [auto-waiting and actionability](https://playwright.dev/python/docs/actionability), and [frame handling](https://playwright.dev/python/docs/frames) inform semantic targeting, bounded readiness checks, and frame-aware execution.
+- [Pydantic models](https://pydantic.dev/docs/validation/latest/concepts/models/) and [validators](https://pydantic.dev/docs/validation/latest/concepts/validators/) inform strict runtime contracts and cross-field validation.
+- Python's [`Protocol`](https://docs.python.org/3/library/typing.html#typing.Protocol) informs the surface-neutral adapter boundary.
+- [OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling) informs the typed, bounded discovery-tool interface.
+- The [OWASP Logging Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html) informs evidence capture, sensitive-data exclusion, and the recommended production audit controls.

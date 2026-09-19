@@ -13,7 +13,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from pigeonhole.surface.base import SurfaceDriver
+from web_explorer.surface.base import SurfaceDriver
 
 
 class LeaseState(BaseModel):
@@ -241,7 +241,7 @@ class HandoffCoordinator:
         )
 
     def operator_app(self) -> FastAPI:
-        app = FastAPI(title="Pigeonhole operator handoff", docs_url=None)
+        app = FastAPI(title="Web Explorer operator handoff", docs_url=None)
         coordinator = self
 
         @app.get("/", response_class=HTMLResponse)
@@ -297,7 +297,7 @@ class HandoffCoordinator:
 
 
 OPERATOR_HTML = """<!doctype html>
-<html><head><title>Pigeonhole operator</title>
+<html><head><title>Web Explorer operator</title>
 <style>body{font-family:system-ui;max-width:760px;margin:2rem auto;line-height:1.45}li{margin:1rem 0;padding:1rem;border:1px solid #aaa;border-radius:8px;list-style:none}ul{padding:0}pre{white-space:pre-wrap;background:#f5f5f5;padding:.75rem}.notice{padding:1rem;background:#fff4d6;border-left:4px solid #c57a00}.badge{margin-left:.5rem;padding:.15rem .45rem;background:#eee;border-radius:1rem}.primary{font-weight:700;padding:.5rem .8rem}.done{color:#555}#message{min-height:1.5rem;color:#9b1c1c}</style>
 </head><body><h1>Live-session handoff</h1>
 <div class="notice"><b>This page is only the control console.</b> After claiming,

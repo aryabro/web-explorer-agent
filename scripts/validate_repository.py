@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from pigeonhole.catalog import iter_capabilities, summarize, tool_definitions
-from pigeonhole.compiler import Job
+from web_explorer.catalog import iter_capabilities, summarize, tool_definitions
+from web_explorer.compiler import Job
 
 ROOT = Path(__file__).resolve().parents[1]
 

@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from pigeonhole.handoff import OPERATOR_HTML, HandoffCoordinator, Intervention
+from web_explorer.handoff import OPERATOR_HTML, HandoffCoordinator, Intervention
 
 
 class CaptureFailureSurface:

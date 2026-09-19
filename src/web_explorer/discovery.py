@@ -11,8 +11,8 @@ from typing import Any, Literal, Protocol
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
-from pigeonhole.config import LLMConfig
-from pigeonhole.contracts import (
+from web_explorer.config import LLMConfig
+from web_explorer.contracts import (
     Action,
     Checkpoint,
     FailureCode,
@@ -23,9 +23,9 @@ from pigeonhole.contracts import (
     StepDiagnostic,
     TargetBundle,
 )
-from pigeonhole.policy import PolicyEngine
-from pigeonhole.redact import Redactor
-from pigeonhole.surface.base import Observation, SurfaceDriver
+from web_explorer.policy import PolicyEngine
+from web_explorer.redact import Redactor
+from web_explorer.surface.base import Observation, SurfaceDriver
 
 
 class Decision(BaseModel):

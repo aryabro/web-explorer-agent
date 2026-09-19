@@ -5,7 +5,7 @@ from pathlib import Path
 import yaml
 from pydantic import Field
 
-from pigeonhole.contracts import (
+from web_explorer.contracts import (
     Capability,
     SemanticTarget,
     StrictModel,

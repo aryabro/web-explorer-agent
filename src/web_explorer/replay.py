@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from pigeonhole.contracts import (
+from web_explorer.contracts import (
     BusinessOutcome,
     Capability,
     EscalatedResult,
@@ -23,10 +23,10 @@ from pigeonhole.contracts import (
     StepDiagnostic,
     SuccessResult,
 )
-from pigeonhole.evidence import EvidenceWriter
-from pigeonhole.policy import PolicyEngine
-from pigeonhole.surface.base import SurfaceDriver, SurfaceResolutionError
-from pigeonhole.tenants import compatibility_fingerprint
+from web_explorer.evidence import EvidenceWriter
+from web_explorer.policy import PolicyEngine
+from web_explorer.surface.base import SurfaceDriver, SurfaceResolutionError
+from web_explorer.tenants import compatibility_fingerprint
 
 EscalatedCallback = Callable[[EscalatedResult], Awaitable[None]]
 

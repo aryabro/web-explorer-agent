@@ -4,7 +4,7 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel, Field
 
-from pigeonhole.contracts import BoundingBox, Checkpoint, Recovery, TargetBundle
+from web_explorer.contracts import BoundingBox, Checkpoint, Recovery, TargetBundle
 
 
 class SurfaceResolutionError(RuntimeError):

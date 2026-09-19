@@ -8,7 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from pigeonhole.redact import Redactor
+from web_explorer.redact import Redactor
 
 LOCATOR_IDENTITY_KEYS = {"target", "strategies"}
 
