@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Literal
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
@@ -167,7 +169,24 @@ class HandoffCoordinator:
     ) -> Intervention:
         intervention = self._get(intervention_id)
         await self.lease.hand_back(operator_id)
-        events = await self.surface.stop_human_capture()
+        # Capture is audit telemetry, not a prerequisite for returning the session.
+        # Navigation may invalidate a Playwright handle while capture is stopped;
+        # that must not strand a run after its lease returned to automation.
+        events: list[dict[str, Any]] = []
+        capture_error: str | None = None
+        try:
+            events = await self.surface.stop_human_capture()
+        except Exception as exc:  # noqa: BLE001 - telemetry must not block hand-back
+            capture_error = type(exc).__name__
+            await self.event(
+                "human_capture_failed",
+                {
+                    "intervention_id": intervention_id,
+                    "operator_id": operator_id,
+                    "error_type": capture_error,
+                    "step_id": intervention.step_id,
+                },
+            )
         intervention.status = "returned"
         intervention.note = note
         self._persist(intervention)
@@ -182,6 +201,7 @@ class HandoffCoordinator:
                     "goal": intervention.goal,
                     "reason": intervention.diagnostic,
                     "human_events": events,
+                    "human_capture_error": capture_error,
                     "intervention_id": intervention_id,
                     "returned_at": datetime.now(UTC).isoformat(),
                     "note": note,
@@ -198,6 +218,7 @@ class HandoffCoordinator:
                 "operator_id": operator_id,
                 "holder": lease_state.holder,
                 "human_event_count": len(events),
+                "human_capture_error": capture_error,
                 "note": note,
                 "step_id": intervention.step_id,
             },
@@ -225,13 +246,28 @@ class HandoffCoordinator:
 
         @app.get("/", response_class=HTMLResponse)
         async def index() -> str:
+            def render_card(item: Intervention) -> str:
+                if item.status == "waiting":
+                    actions = (
+                        f"<button onclick=\"claim('{item.id}')\">Claim control</button>"
+                    )
+                elif item.status == "operator":
+                    actions = (
+                        f'<button class="primary" onclick="giveBack(\'{item.id}\')">'
+                        "Hand back to automation</button>"
+                    )
+                else:
+                    actions = "<span class=done>No action required.</span>"
+                diagnostic = html.escape(json.dumps(item.diagnostic, indent=2))
+                return (
+                    f"<li><b>{html.escape(item.capability_id)}</b> "
+                    f'<span class="badge">{item.status}</span>'
+                    f"<pre>{diagnostic}</pre>{actions}</li>"
+                )
+
             cards = (
                 "".join(
-                    f"""<li><b>{item.capability_id}</b> — {item.status}
-                <pre>{json.dumps(item.diagnostic, indent=2)}</pre>
-                <button onclick="claim('{item.id}')">Claim</button>
-                <button onclick="giveBack('{item.id}')">Hand back</button></li>"""
-                    for item in coordinator.interventions.values()
+                    render_card(item) for item in coordinator.interventions.values()
                 )
                 or "<li>No intervention is waiting.</li>"
             )
@@ -262,17 +298,24 @@ class HandoffCoordinator:
 
 OPERATOR_HTML = """<!doctype html>
 <html><head><title>Pigeonhole operator</title>
-<style>body{font-family:system-ui;max-width:760px;margin:2rem auto}li{margin:1rem;padding:1rem;border:1px solid #777}pre{white-space:pre-wrap}</style>
+<style>body{font-family:system-ui;max-width:760px;margin:2rem auto;line-height:1.45}li{margin:1rem 0;padding:1rem;border:1px solid #aaa;border-radius:8px;list-style:none}ul{padding:0}pre{white-space:pre-wrap;background:#f5f5f5;padding:.75rem}.notice{padding:1rem;background:#fff4d6;border-left:4px solid #c57a00}.badge{margin-left:.5rem;padding:.15rem .45rem;background:#eee;border-radius:1rem}.primary{font-weight:700;padding:.5rem .8rem}.done{color:#555}#message{min-height:1.5rem;color:#9b1c1c}</style>
 </head><body><h1>Live-session handoff</h1>
-<p>Claim the lease here, operate the already-open headed Chromium window directly,
-then hand it back. This console does not proxy browser input.</p>
+<div class="notice"><b>This page is only the control console.</b> After claiming,
+use the separate Chromium test-site window to fix the problem. Return here only after
+the target page is ready, then click <b>Hand back to automation</b>. Keep the replay
+terminal and Chromium window open.</div>
+<p>Workflow: 1) claim control; 2) repair the test site in Chromium; 3) return here and hand back.</p>
+<div id="message"></div>
 <ul>{{CARDS}}</ul>
 <script>
 const operator_id = 'local-operator';
 async function post(url, body) {
+  const message = document.getElementById('message');
+  message.textContent = 'Working...';
   const result = await fetch(url, {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify(body)});
-  if (!result.ok) alert(await result.text()); else location.reload();
+  if (!result.ok) message.textContent = `Action failed: ${await result.text()}`;
+  else location.reload();
 }
 function claim(id){post(`/interventions/${id}/claim`, {operator_id});}
-function giveBack(id){post(`/interventions/${id}/hand-back`, {operator_id, note:prompt('What did you do?') || ''});}
+function giveBack(id){post(`/interventions/${id}/hand-back`, {operator_id, note:''});}
 </script></body></html>"""
