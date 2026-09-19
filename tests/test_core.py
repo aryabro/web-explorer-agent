@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from pigeonhole.compiler import Job, compile_recording
 from pigeonhole.contracts import (
@@ -127,7 +128,7 @@ def test_secret_definitions_allowed_but_secret_literals_impossible() -> None:
     assert job.inputs["pin"].sensitivity == Sensitivity.SECRET
     value = InputValue(name="pin")
     assert value.model_dump() == {"source": "input", "name": "pin"}
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         LiteralValue(value="1937", sensitivity="secret")
 
 
