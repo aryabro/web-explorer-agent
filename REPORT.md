@@ -83,7 +83,7 @@ The result taxonomy is deliberate:
 
 This avoids the common mistake of paging an operator for a legitimate “no such member” result. It also keeps runtime errors separate from UI drift: an expired session may occur with a perfectly stable layout, while locator conflict indicates the artifact no longer identifies one control safely.
 
-Evidence makes the claim inspectable. Every run has a manifest, ordered redacted JSONL trace, and structured result. Discovery adds the recording and model metadata. Failure adds a screenshot. Locator events report winners, agreement, weak resolution, intended tenant overrides, and unexpected semantic loss. The repository includes real runs for normal success, draft denial, business outcome, recoverable interstitial, session failure, tenant specialization, and same-session handoff.
+Evidence makes the claim inspectable. Every run has a manifest, ordered redacted JSONL trace, and structured result. Discovery adds the recording and model metadata. Failure adds a screenshot. Locator events report winners, agreement, weak resolution, intended tenant overrides, and unexpected semantic loss. The repository includes real runs for normal success, draft denial, business outcome, recoverable interstitial, session failure, tenant specialization, and same-session handoff; [`evidence/README.md`](evidence/README.md) indexes each scenario and its important files.
 
 ## 4. Heterogeneity & multi-tenant
 

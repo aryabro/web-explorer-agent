@@ -1,5 +1,5 @@
 {
-  "run_id": "discovery-20260919T000647Z-7ac7f3",
+  "run_id": "discovery-live-read-savings",
   "kind": "discovery",
   "goal": "Sign in, find the supplied member number, and read the current savings balance.",
   "target": "http://127.0.0.1:8765/",

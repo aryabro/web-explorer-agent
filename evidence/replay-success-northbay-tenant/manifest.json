@@ -1,9 +1,9 @@
 {
-  "run_id": "replay-20260919T014150Z-814abc",
+  "run_id": "replay-success-northbay-tenant",
   "kind": "replay",
   "goal": "Signs into Test Bank Operations, opens a member profile, and returns the visible current savings balance.",
-  "target": "http://127.0.0.1:8765/",
+  "target": "http://127.0.0.1:8765/tenant-b/",
   "model": null,
-  "started_at": "2026-09-19T01:41:50.701095+00:00",
+  "started_at": "2026-09-19T01:47:05.539650+00:00",
   "schema_version": "1.0.0"
 }

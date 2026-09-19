@@ -1,5 +1,5 @@
 {
-  "run_id": "qualification-20260919T000823Z-bdaf2e",
+  "run_id": "qualification-fresh-session",
   "kind": "qualification",
   "goal": "Sign in, find the supplied member number, and read the current savings balance.",
   "target": "http://127.0.0.1:8765/",

@@ -164,7 +164,7 @@ The terminal prints an intervention URL on port `8766` and waits. This idle stat
 5. Return to the operator console and click **Hand back to automation**.
 6. Replay reconciles its cursor from live checkpoints and completes from the restored state; it does not restart the whole flow.
 
-The successful example is committed at `evidence/replay-20260919T030302Z-6430b0/`. Its `handoff.json` records the lease, intervention, timestamps, and click/change metadata without typed field values.
+The successful example is committed at [`evidence/replay-success-human-handoff/`](evidence/replay-success-human-handoff/). Its `handoff.json` records the lease, intervention, timestamps, and click/change metadata without typed field values.
 
 ## What the LLM receives during discovery
 
@@ -255,17 +255,19 @@ This capability is useful for testing policy behavior; the primary submitted dis
 
 ## Evidence included in this repository
 
+See [`evidence/README.md`](evidence/README.md) for the file contract, redaction rules, suggested review order, and direct links to the important artifacts.
+
 | Run | Demonstrates |
 | --- | --- |
-| `discovery-20260919T000647Z-7ac7f3` | Genuine model-driven discovery, six verified actions, extracted output |
-| `qualification-20260919T000823Z-bdaf2e` | Fresh-session deterministic qualification |
-| `replay-20260919T001030Z-fbd8b8` | Normal deterministic success |
-| `replay-20260919T013130Z-4fc634` | Draft approval gate |
-| `replay-20260919T014150Z-814abc` | `MEMBER_NOT_FOUND` business outcome |
-| `replay-20260919T014345Z-cf3ee5` | Recoverable interstitial |
-| `replay-20260919T014452Z-3d1171` | Session-expiry hard failure without handoff |
-| `replay-20260919T014705Z-8292c4` | Northbay tenant overlay success |
-| `replay-20260919T030302Z-6430b0` | Same-session operator handoff and successful resume |
+| [`discovery-live-read-savings`](evidence/discovery-live-read-savings/) | Genuine model-driven discovery, six verified actions, extracted output |
+| [`qualification-fresh-session`](evidence/qualification-fresh-session/) | Fresh-session deterministic qualification |
+| [`replay-success-happy-path`](evidence/replay-success-happy-path/) | Normal deterministic success |
+| [`replay-failure-draft-approval`](evidence/replay-failure-draft-approval/) | Draft approval gate |
+| [`replay-outcome-member-not-found`](evidence/replay-outcome-member-not-found/) | `MEMBER_NOT_FOUND` business outcome |
+| [`replay-recovery-interstitial`](evidence/replay-recovery-interstitial/) | Recoverable interstitial |
+| [`replay-failure-session-expired`](evidence/replay-failure-session-expired/) | Session-expiry hard failure without handoff |
+| [`replay-success-northbay-tenant`](evidence/replay-success-northbay-tenant/) | Northbay tenant overlay success |
+| [`replay-success-human-handoff`](evidence/replay-success-human-handoff/) | Same-session operator handoff and successful resume |
 
 Evidence outputs are intentionally redacted, so the caller may receive a value that appears as `[REDACTED]` in committed `result.json`.
 

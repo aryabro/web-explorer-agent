@@ -427,7 +427,7 @@
     "provenance": {
       "discovered_by": "z-ai/glm-5.3-flash-20260826",
       "discovered_at": "2026-09-19T00:08:23.368681Z",
-      "trace_ref": "evidence/discovery-20260919T000647Z-7ac7f3/trace.jsonl",
+      "trace_ref": "evidence/discovery-live-read-savings/trace.jsonl",
       "compiler_version": "pigeonhole-0.1.0"
     }
   }
