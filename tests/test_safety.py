@@ -293,8 +293,11 @@ async def test_handoff_cursor_preserves_prior_outputs(
         votes=[],
     )
 
+    profile_checkpoint = capability.execution.steps[4].checkpoint
+    assert profile_checkpoint is not None
+
     async def visible(checkpoint) -> bool:
-        return checkpoint.expected == "MEMBER PROFILE READY"
+        return checkpoint.id == profile_checkpoint.id
 
     surface.checkpoint_visible = visible  # type: ignore[method-assign]
     cursor = await engine._reconcile_cursor(capability)
