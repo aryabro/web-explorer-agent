@@ -204,7 +204,9 @@ class PlaywrightSurface:
         ordinal = 0
         script = """
         () => {
-          const candidates = [...document.querySelectorAll('input,textarea,select,button,a,strong,span')];
+          const candidates = [...document.querySelectorAll(
+            'input,textarea,select,button,a,strong,span,b,h1,h2,h3,[role="status"]'
+          )];
           const visible = el => {
             const s = getComputedStyle(el), r = el.getBoundingClientRect();
             return s.visibility !== 'hidden' && s.display !== 'none' && r.width > 0 && r.height > 0;
@@ -316,7 +318,9 @@ class PlaywrightSurface:
             raise SurfaceResolutionError(
                 f"observation ref expired or unknown: {ref}"
             ) from exc
-        return frame.locator("input,textarea,select,button,a,strong,span").nth(index)
+        return frame.locator(
+            'input,textarea,select,button,a,strong,span,b,h1,h2,h3,[role="status"]'
+        ).nth(index)
 
     async def act(self, action: str, ref: str | None = None, value: Any = None) -> Any:
         await self._paused.wait()
@@ -371,7 +375,16 @@ class PlaywrightSurface:
                         f"xpath=following::{strategy.element_type}[1]"
                     )
                 )
-        if strategy.name and strategy.element_type in {"button", "a", "strong", "span"}:
+        if strategy.name and strategy.element_type in {
+            "button",
+            "a",
+            "strong",
+            "span",
+            "b",
+            "h1",
+            "h2",
+            "h3",
+        }:
             locators.append(frame.get_by_text(strategy.name, exact=True))
         return locators
 

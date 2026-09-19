@@ -57,6 +57,7 @@ class RecordedStep(BaseModel):
     execution_status: Literal["succeeded", "failed", "checkpoint_failed"] = "succeeded"
     result_detail: str | None = None
     checkpoint_verified: bool | None = None
+    checkpoint_source: Literal["model", "derived", "operator"] | None = None
 
 
 class RecentAction(BaseModel):
@@ -440,6 +441,11 @@ class DiscoveryLoop:
     ) -> DiscoveryResult:
         started = datetime.now(UTC)
         deadline = monotonic() + self.timeout_seconds
+        terminal_checkpoint_texts = {
+            state.checkpoint.expected.casefold()
+            for state in [*(business_outcomes or []), *(fatal_states or [])]
+            if getattr(state, "checkpoint", None) is not None
+        }
         guidance: dict[str, Any] = {}
         if preferred_frame:
             guidance["preferred_frame"] = preferred_frame
@@ -586,6 +592,7 @@ class DiscoveryLoop:
                     "ref": decision.ref,
                     "input_name": decision.input_name,
                     "output": decision.output,
+                    "checkpoint_text": decision.checkpoint_text,
                     "metadata": getattr(self.model, "last_metadata", None),
                 },
             )
@@ -833,6 +840,9 @@ class DiscoveryLoop:
             )
             result_detail: str | None = None
             checkpoint_verified: bool | None = None
+            checkpoint_source: Literal["model", "derived", "operator"] | None = (
+                "model" if checkpoint is not None else None
+            )
             try:
                 extracted = await self.surface.act(
                     decision.action, decision.ref, runtime_value
@@ -854,6 +864,33 @@ class DiscoveryLoop:
                 after = await self.surface.observe()
             except Exception:
                 after = observation
+            proposed_checkpoint = checkpoint
+            if (
+                execution_status == "checkpoint_failed"
+                and checkpoint is not None
+                and after.digest != observation.digest
+            ):
+                derived = await self._derive_checkpoint(
+                    before=observation,
+                    after=after,
+                    checkpoint_id=checkpoint.id,
+                    forbidden=terminal_checkpoint_texts,
+                )
+                if derived is not None:
+                    checkpoint = derived
+                    checkpoint_verified = True
+                    checkpoint_source = "derived"
+                    execution_status = "succeeded"
+                    result_detail = None
+                    await self.event(
+                        "checkpoint_recovered",
+                        {
+                            "source": "derived",
+                            "proposed": proposed_checkpoint.expected,
+                            "verified": derived.expected,
+                            "frame": derived.frame,
+                        },
+                    )
             if execution_status == "succeeded" and after.url != observation.url:
                 redirect_policy = self.policy.evaluate(
                     url=after.url,
@@ -891,6 +928,7 @@ class DiscoveryLoop:
                     execution_status=execution_status,
                     result_detail=result_detail,
                     checkpoint_verified=checkpoint_verified,
+                    checkpoint_source=checkpoint_source,
                 )
             )
             await self.event(
@@ -901,6 +939,8 @@ class DiscoveryLoop:
                     "after_digest": after.digest,
                     "execution_status": execution_status,
                     "checkpoint_verified": checkpoint_verified,
+                    "checkpoint_text": checkpoint.expected if checkpoint else None,
+                    "checkpoint_source": checkpoint_source,
                 },
             )
             if execution_status != "succeeded":
@@ -914,12 +954,28 @@ class DiscoveryLoop:
                     goal=goal,
                     reason=feedback,
                     step_id=steps[-1].id,
+                    expected=checkpoint.expected if checkpoint else None,
+                    observed=self._observed_summary(after),
                 ):
-                    feedback = (
-                        "Operator returned the session, but the failed action remains "
-                        "recorded. Inspect state and report stuck if it is ambiguous."
+                    reconciled = await self.surface.observe()
+                    repaired = await self._reconcile_checkpoint_after_handoff(
+                        step=steps[-1],
+                        before=observation,
+                        after=reconciled,
+                        forbidden=terminal_checkpoint_texts,
                     )
-                    continue
+                    if repaired:
+                        stagnant_actions = 0
+                        feedback = (
+                            "Operator returned the session and the destination state "
+                            "was independently reconciled. Continue from the current UI."
+                        )
+                        continue
+                    stop_reason = "checkpoint_failed_after_handoff"
+                    feedback = (
+                        "Operator returned the session, but no destination checkpoint "
+                        "could be verified."
+                    )
                 break
             if decision.output:
                 outputs[decision.output] = extracted
@@ -970,6 +1026,133 @@ class DiscoveryLoop:
             llm_calls=llm_calls,
         )
 
+    def _checkpoint_candidates(
+        self, before: Observation, after: Observation
+    ) -> list[tuple[str, str | None]]:
+        before_text = {
+            " ".join(text.split()).casefold()
+            for control in before.controls
+            for text in (control.visible_text, control.accessible_name or "")
+            if text.strip()
+        }
+        ranked: list[tuple[int, str, str | None]] = []
+        seen: set[tuple[str, str | None]] = set()
+        for control in after.controls:
+            if control.interactive:
+                continue
+            for raw in (control.visible_text, control.accessible_name or ""):
+                text = " ".join(raw.split())
+                key = (text.casefold(), control.frame)
+                if (
+                    not text
+                    or len(text) > 160
+                    or text.casefold() in before_text
+                    or key in seen
+                    or self.redactor.text(text) != text
+                ):
+                    continue
+                seen.add(key)
+                upper = text.upper() == text and any(char.isalpha() for char in text)
+                keyword = any(
+                    word in text.upper()
+                    for word in ("READY", "SUCCESS", "CONFIRMED", "COMPLETE")
+                )
+                semantic = control.element_type in {"h1", "h2", "h3", "b", "strong"}
+                score = (
+                    (100 if keyword else 0)
+                    + (40 if upper else 0)
+                    + (20 if semantic else 0)
+                    - len(text) // 20
+                )
+                ranked.append((score, text, control.frame))
+        ranked.sort(key=lambda item: (-item[0], len(item[1]), item[1]))
+        return [(text, frame) for _, text, frame in ranked]
+
+    async def _derive_checkpoint(
+        self,
+        *,
+        before: Observation,
+        after: Observation,
+        checkpoint_id: str,
+        forbidden: set[str] | None = None,
+    ) -> Checkpoint | None:
+        for text, frame in self._checkpoint_candidates(before, after):
+            if text.casefold() in (forbidden or set()):
+                continue
+            candidate = Checkpoint(
+                id=checkpoint_id,
+                kind="visible_text",
+                expected=text,
+                frame=frame,
+            )
+            if await self.surface.checkpoint_visible(candidate):
+                return candidate
+        return None
+
+    def _observed_summary(self, observation: Observation) -> str:
+        candidates = [
+            text for text, _ in self._checkpoint_candidates(observation, observation)
+        ]
+        # The same observation has no delta, so include safe visible landmarks directly.
+        if not candidates:
+            candidates = [
+                " ".join(control.visible_text.split())
+                for control in observation.controls
+                if not control.interactive
+                and control.visible_text.strip()
+                and len(control.visible_text) <= 160
+                and self.redactor.text(control.visible_text) == control.visible_text
+            ][:8]
+        return f"digest={observation.digest}; landmarks={candidates[:8]}"
+
+    async def _reconcile_checkpoint_after_handoff(
+        self,
+        *,
+        step: RecordedStep,
+        before: Observation,
+        after: Observation,
+        forbidden: set[str] | None = None,
+    ) -> bool:
+        checkpoint = step.checkpoint
+        if checkpoint is not None and await self.surface.checkpoint_visible(checkpoint):
+            repaired = checkpoint
+        elif checkpoint is not None:
+            repaired = await self._derive_checkpoint(
+                before=before,
+                after=after,
+                checkpoint_id=checkpoint.id,
+                forbidden=forbidden,
+            )
+        else:
+            repaired = None
+        if repaired is None:
+            await self.event(
+                "handoff_reconciliation_failed",
+                {
+                    "step_id": step.id,
+                    "observed": self._observed_summary(after),
+                },
+            )
+            return False
+        proposed = checkpoint.expected if checkpoint else None
+        step.checkpoint = repaired
+        step.checkpoint_verified = True
+        step.checkpoint_source = "operator"
+        step.execution_status = "succeeded"
+        step.result_detail = None
+        step.after_digest = after.digest
+        await self.event(
+            "handoff_reconciled",
+            {
+                "step_id": step.id,
+                "proposed": proposed,
+                "verified": repaired.expected,
+                "frame": repaired.frame,
+                "after_digest": after.digest,
+            },
+        )
+        return True
+
     async def _capture_failure_evidence(self, reason: str) -> None:
         if self.evidence is None or not hasattr(self.evidence, "directory"):
             return
@@ -988,12 +1171,21 @@ class DiscoveryLoop:
                 {"reason": reason, "error_type": type(exc).__name__},
             )
 
-    async def _intervene(self, *, goal: str, reason: str, step_id: str | None) -> bool:
+    async def _intervene(
+        self,
+        *,
+        goal: str,
+        reason: str,
+        step_id: str | None,
+        expected: str | None = None,
+        observed: str | None = None,
+    ) -> bool:
         diagnostic = StepDiagnostic(
             step_id=step_id,
             code=FailureCode.ACTION_FAILED,
             message=reason,
-            expected=goal,
+            expected=expected or goal,
+            observed=observed,
         )
         await self.event(
             "stuck",

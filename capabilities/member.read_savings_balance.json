@@ -80,7 +80,7 @@
     "steps": [
       {
         "id": "s1",
-        "intent": "Enter the runtime employee identifier",
+        "intent": "Enter the runtime operator identifier into the Employee ID field on the staff sign-in form",
         "action": {
           "type": "type",
           "value": {
@@ -113,9 +113,9 @@
               "anchor_text": "Employee ID",
               "element_type": "input",
               "expected_box": {
-                "x": 264.515625,
-                "y": 161.578125,
-                "width": 204.0,
+                "x": 264.3958435058594,
+                "y": 161.25,
+                "width": 210.6666717529297,
                 "height": 34.0
               }
             }
@@ -127,7 +127,7 @@
       },
       {
         "id": "s2",
-        "intent": "Enter the runtime-only security PIN",
+        "intent": "Enter the runtime sign-on PIN into the Security PIN field on the staff sign-in form",
         "action": {
           "type": "type",
           "value": {
@@ -160,9 +160,9 @@
               "anchor_text": "Security PIN",
               "element_type": "input",
               "expected_box": {
-                "x": 264.515625,
-                "y": 214.578125,
-                "width": 204.0,
+                "x": 264.3958435058594,
+                "y": 213.9166717529297,
+                "width": 210.6666717529297,
                 "height": 34.0
               }
             }
@@ -174,7 +174,7 @@
       },
       {
         "id": "s3",
-        "intent": "Sign in to the test bank console",
+        "intent": "Submit the staff sign-in form with the entered Employee ID and Security PIN",
         "action": {
           "type": "click"
         },
@@ -204,9 +204,9 @@
               "anchor_text": "Sign in",
               "element_type": "button",
               "expected_box": {
-                "x": 644.328125,
-                "y": 320.578125,
-                "width": 66.671875,
+                "x": 645.3333740234375,
+                "y": 319.25,
+                "width": 66.0,
                 "height": 34.0
               }
             }
@@ -215,7 +215,8 @@
         "checkpoint": {
           "id": "cp3",
           "kind": "visible_text",
-          "expected": "Member search",
+          "expected": "MEMBER SERVICES",
+          "frame": "night-work",
           "timeout_ms": 5000,
           "role": "intermediate"
         },
@@ -251,7 +252,7 @@
       },
       {
         "id": "s4",
-        "intent": "Enter the requested member number",
+        "intent": "Enter the supplied five-digit member number into the Member number search field on the member search form",
         "action": {
           "type": "type",
           "value": {
@@ -284,9 +285,9 @@
               "anchor_text": "Member number",
               "element_type": "input",
               "expected_box": {
-                "x": 411.71875,
-                "y": 214.578125,
-                "width": 134.0,
+                "x": 411.59375,
+                "y": 213.9166717529297,
+                "width": 137.33334350585938,
                 "height": 34.0
               }
             }
@@ -298,7 +299,7 @@
       },
       {
         "id": "s5",
-        "intent": "Open the matching member profile",
+        "intent": "Submit the member search with the entered member number to open the member record",
         "action": {
           "type": "click"
         },
@@ -328,18 +329,18 @@
               "anchor_text": "Search members",
               "element_type": "button",
               "expected_box": {
-                "x": 1038.15625,
-                "y": 320.578125,
-                "width": 132.84375,
+                "x": 1039.15625,
+                "y": 319.25,
+                "width": 132.17709350585938,
                 "height": 34.0
               }
             }
           ]
         },
         "checkpoint": {
-          "id": "cp5",
+          "id": "cp6",
           "kind": "visible_text",
-          "expected": "MEMBER PROFILE READY",
+          "expected": "Member profile",
           "timeout_ms": 5000,
           "role": "postcondition"
         },
@@ -375,7 +376,7 @@
       },
       {
         "id": "s6",
-        "intent": "Read the visible current savings balance",
+        "intent": "Read the current savings balance shown on the member profile status line in the night-work frame",
         "action": {
           "type": "extract",
           "output": "savings_balance"
@@ -398,7 +399,7 @@
     ],
     "success": {
       "checkpoint_ids": [
-        "cp5"
+        "cp6"
       ],
       "required_outputs": [
         "savings_balance"
@@ -424,9 +425,9 @@
       "status": "draft"
     },
     "provenance": {
-      "discovered_by": "fixture-model-not-submission-evidence",
-      "discovered_at": "2026-09-18T22:48:38.522102Z",
-      "trace_ref": "evidence/fixture/read-discovery/trace.jsonl",
+      "discovered_by": "z-ai/glm-5.3-flash-20260826",
+      "discovered_at": "2026-09-19T00:08:23.368681Z",
+      "trace_ref": "evidence/discovery-20260919T000647Z-7ac7f3/trace.jsonl",
       "compiler_version": "pigeonhole-0.1.0"
     }
   }

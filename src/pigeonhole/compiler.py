@@ -106,6 +106,7 @@ def compile_recording(
                 "execution_status",
                 "result_detail",
                 "checkpoint_verified",
+                "checkpoint_source",
             }
         )
         if recorded.action.type not in {"click", "navigate", "dismiss"}:

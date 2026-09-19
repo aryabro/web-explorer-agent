@@ -4,8 +4,16 @@ import json
 
 import pytest
 
-from pigeonhole.contracts import BoundingBox, Parameter, SemanticTarget, TargetBundle
-from pigeonhole.discovery import Decision, DiscoveryLoop
+from pigeonhole.contracts import (
+    Action,
+    BoundingBox,
+    Checkpoint,
+    Parameter,
+    Risk,
+    SemanticTarget,
+    TargetBundle,
+)
+from pigeonhole.discovery import Decision, DiscoveryLoop, RecordedStep
 from pigeonhole.policy import PolicyEngine
 from pigeonhole.surface.base import ControlObservation, Observation
 
@@ -69,6 +77,36 @@ class OneDecisionModel:
         return self.decision
 
 
+class SequenceModel:
+    name = "test-model"
+
+    def __init__(self, decisions: list[Decision]) -> None:
+        self.decisions = iter(decisions)
+
+    async def decide(self, prompt: str) -> Decision:
+        return next(self.decisions)
+
+
+class LandmarkSurface(ContractSurface):
+    async def observe(self) -> Observation:
+        observation = await super().observe()
+        if self.clicked:
+            observation.controls.append(
+                ControlObservation(
+                    ref="o2:c1",
+                    frame="main",
+                    element_type="b",
+                    interactive=False,
+                    visible_text="DESTINATION READY",
+                    geometry=BoundingBox(x=0, y=20, width=80, height=10),
+                )
+            )
+        return observation
+
+    async def checkpoint_visible(self, checkpoint) -> bool:
+        return self.clicked and checkpoint.expected == "DESTINATION READY"
+
+
 @pytest.mark.asyncio
 async def test_executed_action_with_failed_checkpoint_is_recorded() -> None:
     surface = ContractSurface()
@@ -95,6 +133,80 @@ async def test_executed_action_with_failed_checkpoint_is_recorded() -> None:
     assert len(result.recording.steps) == 1
     assert result.recording.steps[0].execution_status == "checkpoint_failed"
     assert result.recording.steps[0].checkpoint_verified is False
+
+
+@pytest.mark.asyncio
+async def test_bad_model_checkpoint_is_replaced_by_new_verified_landmark() -> None:
+    surface = LandmarkSurface()
+    model = SequenceModel(
+        [
+            Decision(
+                kind="act",
+                intent="Continue",
+                action="click",
+                ref="o1:c0",
+                observation_id="o1",
+                checkpoint_text="A made-up destination description",
+            ),
+            Decision(kind="done", intent="Destination reached"),
+        ]
+    )
+    result = await DiscoveryLoop(surface, model, PolicyEngine.load(), max_steps=2).run(
+        goal="continue",
+        target="http://127.0.0.1:8765/",
+        inputs={},
+        input_names=[],
+        required_outputs=[],
+    )
+
+    assert result.status == "success"
+    step = result.recording.steps[0]
+    assert step.execution_status == "succeeded"
+    assert step.checkpoint_verified is True
+    assert step.checkpoint_source == "derived"
+    assert step.checkpoint is not None
+    assert step.checkpoint.expected == "DESTINATION READY"
+
+
+@pytest.mark.asyncio
+async def test_handoff_return_can_reconcile_and_repair_failed_step() -> None:
+    surface = LandmarkSurface()
+    surface.clicked = True
+    loop = DiscoveryLoop(
+        surface, OneDecisionModel(Decision(kind="done")), PolicyEngine.load()
+    )
+    before = Observation(
+        observation_id="o1",
+        url="http://127.0.0.1:8765/",
+        title="Test",
+        visible_text="Start",
+        controls=[],
+        digest="before",
+    )
+    after = await surface.observe()
+    step = RecordedStep(
+        id="s1",
+        intent="Continue",
+        action=Action(type="click"),
+        target=None,
+        checkpoint=Checkpoint(
+            id="cp1", kind="visible_text", expected="Wrong checkpoint"
+        ),
+        risk=Risk.SAFE,
+        before_digest="before",
+        after_digest=after.digest,
+        execution_status="checkpoint_failed",
+        checkpoint_verified=False,
+        checkpoint_source="model",
+    )
+
+    assert await loop._reconcile_checkpoint_after_handoff(
+        step=step, before=before, after=after
+    )
+    assert step.execution_status == "succeeded"
+    assert step.checkpoint_source == "operator"
+    assert step.checkpoint is not None
+    assert step.checkpoint.expected == "DESTINATION READY"
 
 
 @pytest.mark.asyncio

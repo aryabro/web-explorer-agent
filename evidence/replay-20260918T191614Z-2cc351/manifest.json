@@ -1,9 +1,0 @@
-{
-  "run_id": "replay-20260918T191614Z-2cc351",
-  "kind": "replay",
-  "goal": "Signs into Night Window, opens a member jacket, and returns the visible current savings balance.",
-  "target": "http://127.0.0.1:8765/",
-  "model": null,
-  "started_at": "2026-09-18T19:16:14.174155+00:00",
-  "schema_version": "1.0.0"
-}

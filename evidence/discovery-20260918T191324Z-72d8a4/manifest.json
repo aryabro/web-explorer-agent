@@ -1,9 +1,0 @@
-{
-  "run_id": "discovery-20260918T191324Z-72d8a4",
-  "kind": "discovery",
-  "goal": "Sign on, look up the supplied member number, and read the current savings balance.",
-  "target": "http://127.0.0.1:8765/",
-  "model": "z-ai/glm-5.3-flash-[REDACTED]",
-  "started_at": "2026-09-18T19:13:24.068839+00:00",
-  "schema_version": "1.0.0"
-}
