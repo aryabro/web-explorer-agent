@@ -1,12 +1,14 @@
 capability_id: member.read_savings_balance
 version: 1.0.0
 title: Read a member's savings balance
-description: Signs into Night Window, opens a member jacket, and returns the visible current savings balance.
-goal: Sign on, look up the supplied member number, and read the current savings balance.
+description: Signs into Test Bank Operations, opens a member profile, and returns the visible current savings balance.
+goal: Sign in, find the supplied member number, and read the current savings balance.
 target: http://127.0.0.1:8765/
 product: night-window
 product_version: "4.1"
 surface_kind: legacy_web
+vendor: training-credit-union
+version_range: "4.x"
 tenant: training-bay-17
 max_steps: 14
 inputs:
@@ -29,29 +31,44 @@ outputs:
     sensitivity: financial
 business_outcomes:
   - code: MEMBER_NOT_FOUND
-    description: No member jacket exists for the supplied number.
-    visible_text: NO MATCHING MEMBER
+    description: No member profile exists for the supplied number.
+    checkpoint:
+      id: outcome-member-not-found
+      kind: visible_text
+      expected: NO MATCHING MEMBER
+      frame: night-work
   - code: PERMISSION_DENIED
-    description: The signed-in operator cannot access the member jacket.
-    visible_text: PERMISSION DENIED
+    description: The signed-in employee cannot access the member profile.
+    checkpoint:
+      id: outcome-permission-denied
+      kind: visible_text
+      expected: PERMISSION DENIED
+      frame: night-work
 fatal_states:
   - code: SESSION_EXPIRED
-    description: Night Window ended the authenticated session.
-    visible_text: SESSION EXPIRED
+    description: Test Bank Operations ended the authenticated session.
+    checkpoint:
+      id: fatal-session-expired
+      kind: visible_text
+      expected: SESSION EXPIRED
+      frame: night-work
 click_recoveries:
-  - kind: dismiss_interstitial
-    visible_text: NOTICE FROM RECORDS
-    action_text: Continue lookup
-  - kind: retry_once
-    visible_text: Index turning...
+  - trigger:
+      id: recover-records-notice
+      kind: visible_text
+      expected: MEMBER INDEX NOTICE
+    strategy: dismiss
+    action_text: Continue search
+    timeout_ms: 2000
+    max_attempts: 1
+  - trigger:
+      id: recover-index-turning
+      kind: visible_text
+      expected: Searching...
+    strategy: wait
+    timeout_ms: 3000
+    max_attempts: 1
 preferred_frame: night-work
 discovery_hints:
-  - The "Operator code" field takes operator_id and "Brass key (PIN)" takes pin.
-  - The "Member number" field takes member_id.
-  - Navigation-frame links are for recovery only; never click "Sign On" from the
-    lookup screen.
-  - On WINDOW AUTHORITY, fill operator_id and pin, then click "Turn the key".
-  - On MEMBER PIGEONHOLE / LOOKUP, fill member_id, then click "Pull pigeonhole".
-  - On SAVINGS BALANCE READY, extract the visible dollar value into
-    savings_balance and declare done.
-
+  - The console is a frameset with nested tables and no test ids; use adjacent labels.
+  - Prefer the named work frame listed in the observation.

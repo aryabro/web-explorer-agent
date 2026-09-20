@@ -1,0 +1,1 @@
+{"at": "2026-09-19T01:31:31.753941+00:00", "type": "failed", "payload": {"status": "failure", "error": {"step_id": null, "code": "APPROVAL_REQUIRED", "message": "draft capabilities require --allow-draft or approval", "expected": null, "observed": null}, "completed_steps": [], "llm_calls": 0, "locator_votes": [], "override_score": 0.0, "drift_score": 0.0}}

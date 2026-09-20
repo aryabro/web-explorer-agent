@@ -4,112 +4,68 @@ import json
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
-from pigeonhole.compiler import Job, compile_recording
-from pigeonhole.contracts import (
+from web_explorer.compiler import Job, compile_recording
+from web_explorer.contracts import (
     InputValue,
     LiteralValue,
     Risk,
     Sensitivity,
 )
-from pigeonhole.discovery import Decision, DiscoveryLoop
-from pigeonhole.evidence import EvidenceWriter
-from pigeonhole.fixture_model import ScriptedModel
-from pigeonhole.handoff import HandoffCoordinator, SessionLease
-from pigeonhole.policy import PolicyEngine
-from pigeonhole.redact import Redactor
-from pigeonhole.replay import ReplayEngine, load_capability
-from pigeonhole.surface.playwright import PlaywrightSurface
-from pigeonhole.tenants import apply_tenant, find_profile
+from web_explorer.discovery import DiscoveryLoop
+from web_explorer.evidence import EvidenceWriter
+from web_explorer.handoff import HandoffCoordinator, SessionLease
+from web_explorer.policy import PolicyEngine
+from web_explorer.redact import Redactor
+from web_explorer.replay import ReplayEngine, load_capability
+from web_explorer.scripted_model import ScriptedModel
+from web_explorer.tenants import apply_tenant, find_profile
+from target.profile import launch_browser
 
 
-class ScriptedLookupModel:
-    name = "fixture-model-not-submission-evidence"
-
-    def __init__(self) -> None:
-        self.turn = 0
-
-    async def decide(self, prompt: str) -> Decision:
-        state = json.loads(prompt)
-        controls = state["observation"]["controls"]
-
-        def ref(*phrases: str, element_type: str | None = None) -> str:
-            for control in controls:
-                haystack = (
-                    f"{control['nearby_text']} {control['visible_text']} "
-                    f"{control.get('accessible_name') or ''}"
-                )
-                if all(phrase in haystack for phrase in phrases) and (
-                    element_type is None or control["element_type"] == element_type
-                ):
-                    return control["ref"]
-            raise AssertionError(f"control not found for {phrases}: {controls}")
-
-        if self.turn == 0:
-            decision = Decision(
-                kind="act",
-                intent="Enter the runtime operator identifier",
-                action="type",
-                ref=ref("Operator code", element_type="input"),
-                input_name="operator_id",
-            )
-        elif self.turn == 1:
-            decision = Decision(
-                kind="act",
-                intent="Enter the runtime-only brass key",
-                action="type",
-                ref=ref("Brass key", element_type="input"),
-                input_name="pin",
-            )
-        elif self.turn == 2:
-            decision = Decision(
-                kind="act",
-                intent="Sign on to Night Window",
-                action="click",
-                ref=ref("Turn the key", element_type="button"),
-                checkpoint_text="MEMBER PIGEONHOLE",
-            )
-        elif self.turn == 3:
-            decision = Decision(
-                kind="act",
-                intent="Enter the requested member number",
-                action="type",
-                ref=ref("Member number", element_type="input"),
-                input_name="member_id",
-            )
-        elif self.turn == 4:
-            decision = Decision(
-                kind="act",
-                intent="Open the matching member jacket",
-                action="click",
-                ref=ref("Pull pigeonhole", element_type="button"),
-                checkpoint_text="SAVINGS BALANCE READY",
-            )
-        elif self.turn == 5:
-            decision = Decision(
-                kind="act",
-                intent="Read the visible current savings balance",
-                action="extract",
-                ref=ref("$", element_type="strong"),
-                output="savings_balance",
-            )
-        else:
-            decision = Decision(
-                kind="done", intent="The visible savings balance was extracted"
-            )
-        self.turn += 1
-        return decision
-
-
-@pytest.fixture
-def policy() -> PolicyEngine:
-    return PolicyEngine.load("policy.yaml")
+async def _compile_read_savings(policy: PolicyEngine):
+    inputs = {"operator_id": "teller7", "pin": "1937", "member_id": "12345"}
+    job = Job.load("jobs/read_savings.yaml")
+    surface = await launch_browser(headless=True)
+    try:
+        result = await DiscoveryLoop(
+            surface, ScriptedModel("read"), policy, max_steps=job.max_steps
+        ).run(
+            goal=job.goal,
+            target=job.target,
+            inputs=inputs,
+            input_names=list(job.inputs),
+            required_outputs=list(job.outputs),
+            hints=job.discovery_hints,
+            preferred_frame=job.preferred_frame,
+            click_recoveries=job.click_recoveries,
+        )
+        return compile_recording(result.recording, job, trace_ref="test"), inputs
+    finally:
+        await surface.close()
 
 
 def test_policy_default_deny_and_risk(policy: PolicyEngine) -> None:
     assert (
         policy.evaluate(
             url="http://127.0.0.1:8765/",
+            action="click",
+            risk=Risk.SAFE,
+        ).disposition
+        == "allow"
+    )
+    assert (
+        policy.evaluate(
+            url="http://127.0.0.1:8765/signin.html",
+            action="click",
+            risk=Risk.SAFE,
+        ).disposition
+        == "allow"
+    )
+    assert (
+        policy.evaluate(
+            url="http://127.0.0.1:8765/tenant-b/detail.html",
             action="click",
             risk=Risk.SAFE,
         ).disposition
@@ -141,26 +97,17 @@ def test_policy_default_deny_and_risk(policy: PolicyEngine) -> None:
     )
     assert (
         policy.evaluate(
+            url="http://127.0.0.1:8765/admin",
+            action="click",
+            risk=Risk.SAFE,
+        ).disposition
+        == "deny"
+    )
+    assert (
+        policy.evaluate(
             url="https://www.monroetwplibrary.org/",
             action="click",
             risk=Risk.SAFE,
-        ).disposition
-        == "allow"
-    )
-    assert (
-        policy.evaluate(
-            url="https://mon.search.stellanj.org/search",
-            action="click",
-            risk=Risk.SAFE,
-        ).disposition
-        == "allow"
-    )
-    assert (
-        policy.evaluate(
-            url="https://mon.search.stellanj.org/search",
-            action="click",
-            risk=Risk.SAFE,
-            intent="Place Holds on the first title",
         ).disposition
         == "deny"
     )
@@ -173,6 +120,7 @@ def test_catalog_holds_job_is_loadable() -> None:
     assert "holds_count" in job.outputs
     assert job.fatal_states == []
     assert job.click_recoveries[0].action_text == "Close"
+    assert job.click_recoveries[0].strategy == "dismiss"
 
 
 def test_secret_definitions_allowed_but_secret_literals_impossible() -> None:
@@ -180,7 +128,7 @@ def test_secret_definitions_allowed_but_secret_literals_impossible() -> None:
     assert job.inputs["pin"].sensitivity == Sensitivity.SECRET
     value = InputValue(name="pin")
     assert value.model_dump() == {"source": "input", "name": "pin"}
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         LiteralValue(value="1937", sensitivity="secret")
 
 
@@ -211,23 +159,23 @@ async def test_control_lease_is_fail_closed() -> None:
 
 @pytest.mark.asyncio
 async def test_discovery_compile_and_replay_real_ui(
-    tmp_path: Path, policy: PolicyEngine
+    tmp_path: Path, policy: PolicyEngine, test_bank_server
 ) -> None:
     inputs = {"operator_id": "teller7", "pin": "1937", "member_id": "12345"}
     job = Job.load("jobs/read_savings.yaml")
-    discovery_surface = await PlaywrightSurface.launch(headless=True)
+    discovery_surface = await launch_browser(headless=True)
     try:
         discovery_evidence = EvidenceWriter(
             kind="test-discovery",
             goal=job.goal,
             target=job.target,
-            model=ScriptedLookupModel.name,
+            model=ScriptedModel.name,
             redactor=Redactor(["1937", "12345"]),
             root=tmp_path,
         )
         result = await DiscoveryLoop(
             discovery_surface,
-            ScriptedLookupModel(),
+            ScriptedModel("read"),
             policy,
             max_steps=job.max_steps,
             event_sink=discovery_evidence.event,
@@ -250,11 +198,19 @@ async def test_discovery_compile_and_replay_real_ui(
         )
         serialized = capability.model_dump_json()
         assert "1937" not in serialized
+        assert "value redacted" not in serialized.lower()
         assert len(capability.execution.steps[0].target.strategies) == 3
+        postcondition = capability.execution.success.checkpoint_ids[-1]
+        assert any(
+            step.checkpoint and step.checkpoint.id == postcondition
+            and step.checkpoint.role == "postcondition"
+            for step in capability.execution.steps
+        )
+        assert capability.compatibility.fingerprint
     finally:
         await discovery_surface.close()
 
-    replay_surface = await PlaywrightSurface.launch(headless=True)
+    replay_surface = await launch_browser(headless=True)
     try:
         replay_evidence = EvidenceWriter(
             kind="test-replay",
@@ -289,14 +245,14 @@ async def test_discovery_compile_and_replay_real_ui(
 
 @pytest.mark.asyncio
 async def test_business_outcome_and_interstitial_recovery(
-    tmp_path: Path, policy: PolicyEngine
+    tmp_path: Path, policy: PolicyEngine, test_bank_server
 ) -> None:
     job = Job.load("jobs/read_savings.yaml")
     inputs = {"operator_id": "teller7", "pin": "1937", "member_id": "12345"}
-    discover = await PlaywrightSurface.launch(headless=True)
+    discover = await launch_browser(headless=True)
     try:
         result = await DiscoveryLoop(
-            discover, ScriptedLookupModel(), policy, max_steps=job.max_steps
+            discover, ScriptedModel("read"), policy, max_steps=job.max_steps
         ).run(
             goal=job.goal,
             target=job.target,
@@ -315,7 +271,7 @@ async def test_business_outcome_and_interstitial_recovery(
         ("00000", None, "outcome"),
         ("12345", "interstitial", "success"),
     ]:
-        surface = await PlaywrightSurface.launch(headless=True)
+        surface = await launch_browser(headless=True)
         run_inputs = {**inputs, "member_id": member_id}
         try:
             if fault:
@@ -344,7 +300,7 @@ async def test_business_outcome_and_interstitial_recovery(
 
 @pytest.mark.asyncio
 async def test_mutating_flow_uses_ui_success_and_storage_oracle(
-    tmp_path: Path, policy: PolicyEngine
+    tmp_path: Path, policy: PolicyEngine, test_bank_server
 ) -> None:
     job = Job.load("jobs/open_sub_account.yaml")
     inputs = {
@@ -355,7 +311,7 @@ async def test_mutating_flow_uses_ui_success_and_storage_oracle(
         "nickname": "Trip",
         "opening_deposit": "10.00",
     }
-    discovery = await PlaywrightSurface.launch(headless=True)
+    discovery = await launch_browser(headless=True)
     try:
         result = await DiscoveryLoop(
             discovery,
@@ -378,7 +334,7 @@ async def test_mutating_flow_uses_ui_success_and_storage_oracle(
     finally:
         await discovery.close()
 
-    surface = await PlaywrightSurface.launch(headless=True)
+    surface = await launch_browser(headless=True)
     try:
         await surface.act("navigate", value=job.target)
         await surface.observe()
@@ -413,12 +369,10 @@ async def test_mutating_flow_uses_ui_success_and_storage_oracle(
 
 @pytest.mark.asyncio
 async def test_same_session_handoff_and_checkpoint_resume(
-    tmp_path: Path, policy: PolicyEngine
+    tmp_path: Path, policy: PolicyEngine, test_bank_server
 ) -> None:
-    capability = load_capability("capabilities/member.read_savings_balance.json")
-    inputs = {"operator_id": "teller7", "pin": "1937", "member_id": "12345"}
-    surface = await PlaywrightSurface.launch(headless=True)
-    coordinator = HandoffCoordinator(surface)
+    capability, inputs = await _compile_read_savings(policy)
+    surface = await launch_browser(headless=True)
     evidence = EvidenceWriter(
         kind="test-handoff",
         goal=capability.contract.description,
@@ -427,6 +381,7 @@ async def test_same_session_handoff_and_checkpoint_resume(
         redactor=Redactor(list(inputs.values())),
         root=tmp_path,
     )
+    coordinator = HandoffCoordinator(surface, event_sink=evidence.event)
     engine = ReplayEngine(
         surface=surface,
         policy=policy,
@@ -443,6 +398,7 @@ async def test_same_session_handoff_and_checkpoint_resume(
         )
         first = await engine.run(capability, inputs)
         assert first.status == "escalated"
+        assert first.reason.code == "SESSION_EXPIRED"
         assert (await coordinator.lease.state()).holder is None
 
         await coordinator.claim(first.intervention_id, "operator-test")
@@ -453,23 +409,25 @@ async def test_same_session_handoff_and_checkpoint_resume(
         await work.locator("button").click()
         await work.wait_for_url("**/search.html")
         await work.locator("input").first.fill("12345")
-        await work.get_by_text("Pull pigeonhole", exact=True).click()
-        await work.get_by_text("SAVINGS BALANCE READY").wait_for()
+        await work.get_by_text("Search members", exact=True).click()
+        await work.get_by_text("MEMBER PROFILE READY").wait_for()
         await coordinator.hand_back(
             first.intervention_id, "operator-test", "Restored the member detail view"
         )
 
-        resume_at = await engine.resume_index(capability)
-        assert resume_at == 5
-        final = await engine.run(
-            capability, inputs, start_index=resume_at, navigate=False
-        )
+        final = await engine.continue_after_handoff(capability, inputs)
         assert final.status == "success"
+        assert final.llm_calls == 0
         audit = (evidence.directory / "handoff.json").read_text(encoding="utf-8")
         assert "operator-test" in audit
         assert '"event": "click"' in audit
         assert "1937" not in audit
         assert "12345" not in audit
+        trace = (evidence.directory / "trace.jsonl").read_text(encoding="utf-8")
+        assert "handoff_claimed" in trace
+        assert "handoff_returned" in trace
+        assert "resumed" in trace
+        assert '"basis": "live checkpoints"' in trace
     finally:
         await surface.close()
 
@@ -479,10 +437,12 @@ def test_tenant_profile_patches_semantic_labels() -> None:
     specialized = apply_tenant(capability, find_profile("northbay"))
     assert specialized.compatibility.tenant == "northbay"
     assert specialized.compatibility.surface.entry_point.endswith("/tenant-b/")
+    assert specialized.compatibility.surface.vendor == "north-bay-credit-union"
+    assert "tenant-b" in (specialized.compatibility.fingerprint or "")
     s1 = specialized.execution.steps[0].target.strategies[0]
     assert s1.kind == "semantic"
-    assert s1.adjacent_text == "Teller ID"
-    assert specialized.execution.steps[2].checkpoint.expected == "MEMBER JACKET"
+    assert s1.adjacent_text == "Staff ID"
+    assert specialized.execution.steps[2].checkpoint.expected == "Member search"
 
 
 @pytest.mark.asyncio
@@ -491,7 +451,7 @@ async def test_draft_replay_is_rejected_without_override(
 ) -> None:
     capability = load_capability("capabilities/member.read_savings_balance.json")
     assert capability.governance.approval.status == "draft"
-    surface = await PlaywrightSurface.launch(headless=True)
+    surface = await launch_browser(headless=True)
     try:
         evidence = EvidenceWriter(
             kind="test-draft",
@@ -514,7 +474,7 @@ async def test_draft_replay_is_rejected_without_override(
 
 
 def test_catalog_lists_and_emits_tool_defs() -> None:
-    from pigeonhole.catalog import find_capability, iter_capabilities, tool_definitions
+    from web_explorer.catalog import find_capability, iter_capabilities, tool_definitions
 
     rows = iter_capabilities()
     ids = {capability.contract.id for _, capability in rows}
@@ -527,14 +487,13 @@ def test_catalog_lists_and_emits_tool_defs() -> None:
 
 @pytest.mark.asyncio
 async def test_northbay_override_replays_and_bare_tenant_drifts(
-    tmp_path: Path, policy: PolicyEngine
+    tmp_path: Path, policy: PolicyEngine, test_bank_server
 ) -> None:
-    capability = load_capability("capabilities/member.read_savings_balance.json")
-    inputs = {"operator_id": "teller7", "pin": "1937", "member_id": "12345"}
+    capability, inputs = await _compile_read_savings(policy)
     profile = find_profile("northbay")
     specialized = apply_tenant(capability, profile)
 
-    surface = await PlaywrightSurface.launch(headless=True)
+    surface = await launch_browser(headless=True)
     try:
         evidence = EvidenceWriter(
             kind="test-tenant-b",
@@ -552,14 +511,16 @@ async def test_northbay_override_replays_and_bare_tenant_drifts(
         ).run(specialized, inputs)
         assert replay.status == "success"
         assert replay.outputs["savings_balance"] == "$1842.37"
-        assert replay.drift_score > 0
+        assert replay.override_score > 0
+        assert replay.drift_score == 0
         assert any(vote.overridden for vote in replay.locator_votes)
+        assert not any(vote.drifted for vote in replay.locator_votes)
     finally:
         await surface.close()
 
     drifted = capability.model_copy(deep=True)
     drifted.compatibility.surface.entry_point = profile.entry_point
-    surface = await PlaywrightSurface.launch(headless=True)
+    surface = await launch_browser(headless=True)
     try:
         evidence = EvidenceWriter(
             kind="test-tenant-drift",
@@ -578,4 +539,3 @@ async def test_northbay_override_replays_and_bare_tenant_drifts(
         assert replay.status in {"failure", "escalated"}
     finally:
         await surface.close()
-

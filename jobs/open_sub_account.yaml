@@ -1,12 +1,14 @@
 capability_id: member.open_sub_account
 version: 1.0.0
 title: Open a member sub-account
-description: Signs in, opens a member jacket, reviews a new savings card, and creates it after confirmation.
-goal: Open a new sub-account for the supplied member and reach the visible creation confirmation.
+description: Signs into Test Bank Operations, opens a member profile, reviews a new savings account, and creates it after confirmation.
+goal: Open a new savings account for the supplied member and reach the visible creation confirmation.
 target: http://127.0.0.1:8765/
 product: night-window
 product_version: "4.1"
 surface_kind: legacy_web
+vendor: training-credit-union
+version_range: "4.x"
 tenant: training-bay-17
 max_steps: 20
 inputs:
@@ -41,31 +43,41 @@ outputs:
     sensitivity: identifier
 business_outcomes:
   - code: MEMBER_NOT_FOUND
-    description: No member jacket exists for the supplied number.
-    visible_text: NO MATCHING MEMBER
+    description: No member profile exists for the supplied number.
+    checkpoint:
+      id: outcome-member-not-found
+      kind: visible_text
+      expected: NO MATCHING MEMBER
+      frame: night-work
   - code: PERMISSION_DENIED
-    description: The signed-in operator cannot access the member jacket.
-    visible_text: PERMISSION DENIED
+    description: The signed-in employee cannot access the member profile.
+    checkpoint:
+      id: outcome-permission-denied
+      kind: visible_text
+      expected: PERMISSION DENIED
+      frame: night-work
 fatal_states:
   - code: SESSION_EXPIRED
-    description: Night Window ended the authenticated session.
-    visible_text: SESSION EXPIRED
+    description: Test Bank Operations ended the authenticated session.
+    checkpoint:
+      id: fatal-session-expired
+      kind: visible_text
+      expected: SESSION EXPIRED
+      frame: night-work
 click_recoveries:
-  - kind: dismiss_interstitial
-    visible_text: NOTICE FROM RECORDS
-    action_text: Continue lookup
-  - kind: retry_once
-    visible_text: Index turning...
+  - trigger:
+      id: recover-records-notice
+      kind: visible_text
+      expected: MEMBER INDEX NOTICE
+    strategy: dismiss
+    action_text: Continue search
+    timeout_ms: 2000
+    max_attempts: 1
+  - trigger:
+      id: recover-index-turning
+      kind: visible_text
+      expected: Searching...
+    strategy: wait
+    timeout_ms: 3000
+    max_attempts: 1
 preferred_frame: night-work
-discovery_hints:
-  - The "Operator code" field takes operator_id and "Brass key (PIN)" takes pin.
-  - The "Member number" field takes member_id.
-  - Navigation-frame links are for recovery only; never click "Sign On" from the
-    lookup screen.
-  - On WINDOW AUTHORITY, fill operator_id and pin, then click "Turn the key".
-  - On MEMBER PIGEONHOLE / LOOKUP, fill member_id, then click "Pull pigeonhole".
-  - From the member jacket, open the new sub-account form, fill product,
-    nickname and opening_deposit, then review before confirming.
-  - Creating the account is a mutating action; extract the displayed account
-    identifier into account_id once the confirmation screen is visible.
-

@@ -1,21 +1,21 @@
 <!doctype html>
 <html>
 <head>
-  <title>Teller sign on</title>
+  <title>Staff sign in</title>
   <link rel="stylesheet" href="/static/legacy.css">
   <script src="/static/app.js"></script>
   <script src="/runtime-config.js"></script>
 </head>
 <body>
-  <div class="mast">WINDOW AUTHORITY / NORTH BAY</div>
-  <div class="panel">
-    <p>Identify the teller assigned to this night window.</p>
+  <div class="mast"><span>SECURE ACCESS</span><small>Test Bank — North Branch</small></div>
+  <div class="page-intro"><h1>Staff sign in</h1><p>Enter your staff credentials to access member services.</p></div>
+  <div class="panel compact-panel">
     <table class="form">
-      <tr><td>Teller ID</td><td><input autocomplete="off" size="18"></td></tr>
-      <tr><td>Access PIN</td><td><input type="password" autocomplete="off" size="18"></td></tr>
-      <tr><td colspan="2" style="text-align:right"><button>Unlock console</button></td></tr>
+      <tr><td>Staff ID</td><td><input autocomplete="off" size="22"></td></tr>
+      <tr><td>Access code</td><td><input type="password" autocomplete="off" size="22"></td></tr>
+      <tr><td>Branch</td><td><select><option>North branch</option><option>Remote services</option></select></td></tr>
+      <tr><td colspan="2" class="actions"><button class="primary">Continue</button></td></tr>
     </table>
-    <p class="dim">Training fixture: operator <b>teller7</b>. PIN comes from runtime configuration.</p>
     <div class="warning hidden" data-message></div>
   </div>
   <script>
@@ -35,7 +35,7 @@
         NightWindow.go("search");
       } else {
         const message = document.querySelector("[data-message]");
-        message.textContent = "SIGN-ON REFUSED: teller ID or access PIN was not accepted.";
+        message.textContent = "SIGN-IN FAILED: staff ID or access code was not accepted.";
         message.classList.remove("hidden");
       }
     };

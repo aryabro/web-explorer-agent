@@ -1,0 +1,17 @@
+{
+  "id": "e8f382af7dde",
+  "capability_id": "member.read_savings_balance",
+  "goal": "Signs into Test Bank Operations, opens a member profile, and returns the visible current savings balance.",
+  "diagnostic": {
+    "step_id": "s5",
+    "code": "SESSION_EXPIRED",
+    "message": "Test Bank Operations ended the authenticated session.",
+    "expected": "SESSION EXPIRED",
+    "observed": "SESSION EXPIRED"
+  },
+  "step_id": "s5",
+  "raised_at": "2026-09-19T03:03:19.694490Z",
+  "status": "returned",
+  "operator_id": "local-operator",
+  "note": ""
+}

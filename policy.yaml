@@ -2,12 +2,19 @@ version: 1
 allowed_origins:
   - http://127.0.0.1:8765
   - http://localhost:8765
-  - https://www.monroetwplibrary.org
-  - https://monroetwplibrary.org
-  - https://mon.search.stellanj.org
 allowed_path_prefixes:
   - /
+  - /signin.html
+  - /search.html
+  - /detail.html
+  - /nav.html
+  - /static/
+  - /runtime-config.js
   - /tenant-b
+  - /open-account.html
+  - /confirm-account.html
+  - /created-account.html
+  - /not-found.html
 allowed_actions:
   - navigate
   - click
@@ -21,7 +28,13 @@ risk:
   safe: allow
   mutating: confirm
   irreversible: deny
+risk_inference:
+  irreversible:
+    - '(?i)\b(irreversible|cannot undo|permanently delete)\b'
+  mutating:
+    - '(?i)\bcreate(d)? account\b'
+    - '(?i)\bconfirm and create\b'
+    - '(?i)\bopen(ing)? (another )?((sub[- ]?)|savings )?account\b'
 deny_text_patterns:
   - '(?i)\b(delete|liquidate|wire transfer)\b'
   - '(?i)\bplace holds?\b'
-

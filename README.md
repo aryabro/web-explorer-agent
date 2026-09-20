@@ -1,0 +1,317 @@
+# Web Explorer
+
+Web Explorer is a discover-once, replay-many computer-use system for legacy applications that do not expose an API. An LLM operates a real browser during discovery. A compiler turns the verified run into a typed, reviewable capability. Production-style replay executes that capability without an LLM and returns one of four explicit results: `success`, `outcome`, `failure`, or `escalated`.
+
+```text
+job + runtime inputs
+  -> DISCOVERY (LLM)
+  -> verified recording
+  -> COMPILER
+  -> draft capability
+  -> QUALIFICATION (fresh browser, no LLM)
+  -> CAPABILITY CATALOG
+
+agent call -> CAPABILITY CATALOG -> REPLAY (no LLM)
+  -> success | outcome | failure | escalated
+                                      |
+                                      -> operator -> reconcile -> resume
+```
+
+The bundled target is **Test Bank Operations**, a fictional local back-office banking console. It is intentionally inconvenient: frames, nested tables, weak semantics, per-session salted field names, runtime interstitials, session expiry, and a second tenant variant. No real credentials or customer data are used.
+
+The end-to-end workflow is:
+
+1. A YAML job declares the natural-language goal, entry point, typed inputs and outputs, known outcomes, fatal states, recovery rules, and discovery limits.
+2. Discovery sends a bounded, redacted observation to the model. The model chooses one typed action; trusted runtime code validates it, applies policy, acts through the surface adapter, verifies the transition, and records the result.
+3. The compiler accepts only a successful recording with extracted outputs and verified screen transitions, then emits a versioned `draft` capability.
+4. Qualification replays that candidate in a fresh browser with zero model calls. Only a successful candidate is published to `capabilities/`.
+5. Later callers invoke the saved capability by path or catalog ID. Replay resolves recorded targets, executes deterministic actions, checks outcomes and fatal states, applies bounded recovery, verifies checkpoints, and returns a typed result.
+6. If replay cannot safely continue and handoff is enabled, automation pauses and cedes a lease. An operator uses the same browser session; after hand-back, replay derives its resume point from live checkpoints rather than restarting.
+
+## Implementation status
+
+| Requirement | Implemented boundary | Proof |
+| --- | --- | --- |
+| Goal-driven discovery | OpenAI-compatible tool-calling loop over a live Playwright browser | [`discovery-result.json`](evidence/discovery-live-read-savings/discovery-result.json) |
+| Structured artifact | Strict Pydantic schema with contract, compatibility, execution, and governance sections | [`member.read_savings_balance.json`](capabilities/member.read_savings_balance.json) |
+| Deterministic replay | Separate replay engine with no discovery/model dependency and `llm_calls: 0` in every result type | [`result.json`](evidence/replay-success-happy-path/result.json) |
+| Robust targeting | Semantic, structural, and geometry candidates must resolve to the same element identity | [`locator_votes`](evidence/replay-success-happy-path/result.json) |
+| Runtime errors | Declared outcomes, bounded recovery, fatal states, typed failures, and failure screenshots | [`evidence/README.md`](evidence/README.md) |
+| Safety | Default-deny policy, trusted risk inference, mutation confirmation, and redaction before model/disk sinks | [`policy.yaml`](policy.yaml) |
+| Human handoff | Fail-closed lease, intervention evidence, same live Chromium session, and checkpoint-based resume | [`replay-success-human-handoff`](evidence/replay-success-human-handoff/) |
+| Multi-tenant reuse | Product/version metadata, sparse semantic/checkpoint overlays, and separate override/drift scores | [`northbay.yaml`](tenants/northbay.yaml) |
+| Agent invocation | Local capability catalog plus OpenAI-style tool definitions | [`catalog.py`](src/web_explorer/catalog.py) |
+
+This is a focused vertical slice, not a production banking integration. Only the Playwright web adapter is implemented; the desktop adapter, authenticated remote operator access, signed governance, immutable evidence store, and fleet services are deliberate cuts documented in [REPORT.md](REPORT.md).
+
+## Requirements and setup
+
+- Python 3.11 or newer
+- Playwright Chromium
+- A model API key only for genuine discovery
+- No external service or model key for replay and tests
+
+```bash
+python -m venv .venv
+```
+
+```powershell
+# Windows PowerShell
+.venv\Scripts\Activate.ps1
+```
+
+```bash
+# macOS/Linux
+source .venv/bin/activate
+```
+
+```bash
+python -m pip install -e ".[dev]"
+python -m playwright install chromium
+```
+
+Create `.env` from `.env.example` using `Copy-Item .env.example .env` on PowerShell or `cp .env.example .env` on macOS/Linux.
+
+| Variable | Used by | Default / example |
+| --- | --- | --- |
+| `CUA_LLM_API_KEY` | Genuine discovery only | Required for `discover` |
+| `CUA_LLM_BASE_URL` | Genuine discovery only | Any compatible `/chat/completions` endpoint |
+| `CUA_LLM_MODEL` | Genuine discovery only | Model name exposed by that endpoint |
+| `NIGHT_WINDOW_URL` | Local fixture | `http://127.0.0.1:8765` |
+| `NIGHT_WINDOW_PIN` | Runtime sign-in input | `1937` |
+
+The CLI supplies fictional operator ID `teller7` and the runtime PIN when those declared inputs are omitted. The capability stores input *references*, never the PIN value. Do not commit a real model key.
+
+To review the system without a model or external service, start the bundled target and skip directly to replay in step 3 below. The committed capability, every replay scenario, the validator, and the test suite run without `CUA_LLM_API_KEY`; the tests start the local target automatically.
+
+## End-to-end demo
+
+### 1. Start the target
+
+In terminal one:
+
+```bash
+python -m target.server
+```
+
+The fixture is now available at `http://127.0.0.1:8765`.
+
+### 2. Run genuine discovery
+
+In terminal two:
+
+```bash
+web-explorer discover \
+  --job jobs/read_savings.yaml \
+  --input member_id=12345 \
+  --headed
+```
+
+PowerShell accepts the command on one line, or with backticks instead of `\`. Discovery drives the UI, writes a run under `evidence/`, compiles a draft capability, and immediately qualifies it in a fresh browser session. The file is published to `capabilities/` only if qualification succeeds.
+
+Qualification is the candidate capability's first deterministic replay in a new browser. It is intentionally separate from discovery so stale cookies, navigation state, or other discovery-session residue cannot make a broken artifact appear valid. It makes no model calls and is retained as a publication gate.
+
+### 3. Replay without a model
+
+```bash
+web-explorer replay \
+  --capability capabilities/member.read_savings_balance.json \
+  --input member_id=54321 \
+  --allow-draft
+```
+
+The structured result includes `status`, `outputs`, `completed_steps`, locator agreement, tenant override/drift scores, and `llm_calls: 0`. `--allow-draft` is an explicit local-development override. To approve the artifact instead:
+
+```bash
+web-explorer approve \
+  --capability capabilities/member.read_savings_balance.json \
+  --by reviewer-name
+```
+
+### 4. Exercise the result contract
+
+```bash
+# Declared business outcome, not an automation failure
+web-explorer replay --capability capabilities/member.read_savings_balance.json --input member_id=00000 --allow-draft
+
+# Known interstitial: bounded dismiss recovery, then success
+web-explorer replay --capability capabilities/member.read_savings_balance.json --input member_id=12345 --fault interstitial --allow-draft
+
+# Same base capability, second tenant overlay
+web-explorer replay --capability capabilities/member.read_savings_balance.json --input member_id=12345 --tenant northbay --allow-draft
+
+# Session expiry as a typed hard failure
+web-explorer replay --capability capabilities/member.read_savings_balance.json --input member_id=12345 --fault session_drop --no-handoff --allow-draft
+```
+
+| Scenario | Result |
+| --- | --- |
+| Existing member | `success` with `savings_balance` |
+| Member `00000` | `outcome` / `MEMBER_NOT_FOUND` |
+| Known interstitial | Bounded recovery, then `success` |
+| Session expiry without handoff | `failure` / `SESSION_EXPIRED` |
+| Session expiry with headed handoff | `escalated`, operator takeover, then `success` |
+| Draft without override | `failure` / `APPROVAL_REQUIRED` before browser actions |
+
+### 5. Exercise live human handoff
+
+```bash
+web-explorer replay \
+  --capability capabilities/member.read_savings_balance.json \
+  --input member_id=54321 \
+  --fault session_drop \
+  --headed \
+  --allow-draft
+```
+
+The terminal prints an intervention URL on port `8766` and waits. This idle state is intentional.
+
+1. Keep the replay terminal and Playwright Chromium window open.
+2. Open `http://127.0.0.1:8766` in a separate, regular browser window.
+3. Click **Claim control**.
+4. In the Playwright-controlled Test Bank window, sign in as `teller7` with PIN `1937`, then search for member `54321` to restore the member profile.
+5. Return to the operator console and click **Hand back to automation**.
+6. Replay reconciles its cursor from live checkpoints and completes from the restored state; it does not restart the whole flow.
+
+The successful example is committed at [`evidence/replay-success-human-handoff/`](evidence/replay-success-human-handoff/). Its `handoff.json` records the lease, intervention, timestamps, and click/change metadata without typed field values.
+
+## What the LLM receives during discovery
+
+Each turn is a redacted, typed `ModelTurn`; the model does not receive a raw Playwright `Page`, arbitrary DOM access, session storage, or runtime secrets.
+
+| Field | Purpose |
+| --- | --- |
+| `goal` | Natural-language task |
+| `target_guidance` | Preferred frame and job-authored hints |
+| `declared_inputs` | Input names, types, descriptions, sensitivity; not secret values |
+| `required_outputs` | Output names, types, descriptions, sensitivity |
+| `terminal_states` | Declared business outcomes and fatal checkpoints |
+| `outputs_already_extracted` | Prevents premature `done` |
+| `recent_actions` | Last eight semantic actions and results, without reusable refs |
+| `feedback` | Runtime rejection, failed checkpoint, or no-progress guidance |
+| `budget` | Current step, steps remaining, and seconds remaining |
+| `observation` | URL, title, frames, bounded controls, state, nearby text, geometry, and an observation digest |
+
+Controls receive ephemeral refs such as `o4:c3`. The observation ID changes on every observation, and stale refs are rejected. The model must call exactly one tool: `click`, `type`, `select`, `extract`, `dismiss`, `done`, or `stuck`. It can choose only listed refs and declared input/output names; it never writes CSS or persists a visible secret. The runtime independently infers risk, enforces policy, harvests durable target strategies, performs the action, and verifies completion.
+
+The current discovery adapter is structured DOM/frame perception rather than a vision model. Screenshots are evidence, not model input. A future visual or desktop adapter can implement the same `SurfaceDriver` contract.
+
+## Architecture
+
+### Discovery and compilation
+
+`DiscoveryLoop` follows observe -> decide -> validate -> policy -> act -> verify. It records attempted actions even when their checkpoint fails, so a later model `done` cannot compile a fictional success. `CompletionVerifier` requires all outputs, successful actions, verified transition checkpoints, a still-visible final checkpoint, and absence of a terminal state.
+
+`compile_recording()` rejects unsuccessful recordings, failed actions, unverified transitions, and missing outputs. It strips runtime digests, converts input use into `InputValue` references, marks the final transition checkpoint as the postcondition, adds provenance, and emits a `draft` capability. A fresh qualification replay must succeed before the CLI publishes it.
+
+### Capability artifact
+
+The artifact has four sections:
+
+- `contract`: agent-facing ID/version, typed inputs/outputs, sensitivity, and business outcomes.
+- `compatibility`: surface kind, vendor/product/version, entry point, tenant, fingerprint, and applied overlays.
+- `execution`: ordered steps, value sources, target bundles, checkpoints, recoveries, fatal states, and success conditions.
+- `governance`: approval state and discovery/compiler provenance.
+
+Pydantic uses `extra="forbid"` and cross-field validation. Duplicate step IDs, unknown input/output references, and success conditions referring to absent checkpoints are rejected while loading the artifact.
+
+### Targeting and deterministic replay
+
+Before an action, discovery harvests up to three independent target descriptions:
+
+1. **Semantic**: test ID, role/name, adjacent label, and element type.
+2. **Structural**: frame, table/row/cell position, element type, and type index.
+3. **Geometry**: frame, anchor text, element type, and expected box.
+
+Replay resolves every viable strategy and stamps the resulting elements with opaque identities. All resolved candidates must identify the same element. If no strategy resolves, replay returns `LOCATOR_UNRESOLVED`; disagreement is `LOCATOR_CONFLICT`; one remaining strategy is allowed but recorded as a weak vote. This is intentionally conservative: replay does not click a plurality winner or ask an LLM to guess.
+
+After each action, replay checks declared outcomes, fatal states, the expected checkpoint, and then any applicable bounded recovery until the checkpoint deadline. It finally verifies required outputs and the postcondition. The session-storage ledger is only a test oracle and never establishes replay success.
+
+### Safety and evidence
+
+`policy.yaml` allowlists origins, paths, actions, and risk dispositions. The same policy runs during discovery and replay. Model-declared risk is advisory; trusted risk is inferred from the chosen control. Safe actions are allowed, mutating actions require `--allow-mutating`, and irreversible actions are denied.
+
+Known sensitive runtime values and common identifier/financial patterns are redacted before model egress and before evidence is written. Screenshot capture temporarily masks known runtime values in every accessible frame and then restores the page. Locator identity fields are preserved because redacting them would make the capability unusable.
+
+Each run directory contains a manifest, a redacted JSONL trace, and a structured result. Discovery additionally writes `recording.jsonl` and `discovery-result.json`; failures include a screenshot; handoff includes `intervention.json`, an intervention screenshot, and `handoff.json`.
+
+## Agent-facing catalog
+
+```bash
+web-explorer list
+web-explorer tools
+web-explorer call --id member.read_savings_balance --input member_id=54321 --allow-draft
+```
+
+`tools` projects capability inputs into OpenAI-style function definitions. The catalog is deliberately a local file scan, not a network service.
+
+## Mutating workflow coverage
+
+[`jobs/open_sub_account.yaml`](jobs/open_sub_account.yaml) defines the mutating example. The browser-backed test compiles and replays it with an independent storage oracle, proving that mutation requires `--allow-mutating` and occurs exactly once. A compiled copy is not committed because the previous one came from a scripted development run whose evidence was removed; submitted capability artifacts are now limited to genuine discovery.
+
+## Evidence included in this repository
+
+See [`evidence/README.md`](evidence/README.md) for the file contract, redaction rules, suggested review order, and direct links to the important artifacts.
+
+| Run | Demonstrates |
+| --- | --- |
+| [`discovery-live-read-savings`](evidence/discovery-live-read-savings/) | Genuine model-driven discovery, six verified actions, extracted output |
+| [`qualification-fresh-session`](evidence/qualification-fresh-session/) | Fresh-session deterministic qualification |
+| [`replay-success-happy-path`](evidence/replay-success-happy-path/) | Normal deterministic success |
+| [`replay-failure-draft-approval`](evidence/replay-failure-draft-approval/) | Draft approval gate |
+| [`replay-outcome-member-not-found`](evidence/replay-outcome-member-not-found/) | `MEMBER_NOT_FOUND` business outcome |
+| [`replay-recovery-interstitial`](evidence/replay-recovery-interstitial/) | Recoverable interstitial |
+| [`replay-failure-session-expired`](evidence/replay-failure-session-expired/) | Session-expiry hard failure without handoff |
+| [`replay-success-northbay-tenant`](evidence/replay-success-northbay-tenant/) | Northbay tenant overlay success |
+| [`replay-success-human-handoff`](evidence/replay-success-human-handoff/) | Same-session operator handoff and successful resume |
+
+Evidence outputs are intentionally redacted, so the caller may receive a value that appears as `[REDACTED]` in committed `result.json`.
+
+## Tests
+
+```bash
+python -m pytest
+python scripts/validate_repository.py
+```
+
+The suite currently collects 37 tests. Important coverage includes frame-aware readiness, real-browser discovery/compile/replay, outcome and recovery paths, mutating policy, locator conflict, stale observation refs, compiler invariants, tenant overlays, draft approval, redaction, lease expiry, capture failure during hand-back, and same-session checkpoint resume. The repository validator separately checks committed capability schemas, provenance paths, evidence JSON/JSONL, run-directory identities, job definitions, and catalog freshness.
+
+GitHub Actions runs the validator and the complete suite with Playwright Chromium on Python 3.12. Docker is intentionally not required: tests start the local FastAPI target in-process, while the automation controls a runner-local browser. Containerizing either side would add networking and browser-handoff complexity without strengthening the boundary under test.
+
+Tests use a scripted decision model but still drive the real local UI. They do not replace the committed genuine discovery run.
+
+## Repository guide
+
+| Path | Responsibility |
+| --- | --- |
+| `src/web_explorer/contracts.py` | Strict capability schema, result union, risk/sensitivity/failure enums |
+| `src/web_explorer/discovery.py` | Model tools, typed turn context, discovery loop, completion verification |
+| `src/web_explorer/compiler.py` | Recording validation and capability construction |
+| `src/web_explorer/replay.py` | Deterministic executor, error taxonomy, recovery, resume cursor |
+| `src/web_explorer/surface/base.py` | Surface-neutral protocol and observations |
+| `src/web_explorer/surface/perception.py` | Observation normalization and target harvesting |
+| `src/web_explorer/surface/resolution.py` | Surface-neutral identity-voting rule |
+| `src/web_explorer/surface/playwright.py` | Web/frame adapter, actions, checkpoints, screenshots, human-event capture |
+| `src/web_explorer/policy.py` | Default-deny location/action/risk decisions |
+| `src/web_explorer/redact.py` | Exact-value and pattern redaction |
+| `src/web_explorer/evidence.py` | Run directories and redacted JSON/JSONL sinks |
+| `src/web_explorer/handoff.py` | Session lease, interventions, operator console, hand-back evidence |
+| `src/web_explorer/tenants.py` | Sparse tenant specialization and fingerprint updates |
+| `src/web_explorer/catalog.py` | Local capability discovery and tool projection |
+| `src/web_explorer/cli.py` | User-facing orchestration commands |
+| `jobs/` | Discovery contracts and fixture-specific guidance |
+| `capabilities/` | Compiled, versioned capability artifacts |
+| `tenants/` | Tenant-specific sparse overrides |
+| `target/` | Local Test Bank fixture and launch profile |
+| `evidence/` | Committed redacted discovery, replay, failure, and handoff runs |
+| `tests/` | Contract, architecture, browser, safety, and handoff tests |
+
+## References
+
+The following primary documentation informed the main architecture decisions. See [REPORT.md](REPORT.md) for the resulting trade-offs, limits, and proposed production roadmap.
+
+- **Browser targeting and readiness:** [Playwright locators](https://playwright.dev/python/docs/locators), [auto-waiting and actionability](https://playwright.dev/python/docs/actionability), and [frame handling](https://playwright.dev/python/docs/frames) support semantic targets, bounded readiness checks, and explicit frame identity.
+- **Runtime contracts:** [Pydantic models](https://pydantic.dev/docs/validation/latest/concepts/models/) and [validators](https://pydantic.dev/docs/validation/latest/concepts/validators/) support strict artifact/result schemas and cross-field invariants.
+- **Surface abstraction:** Python's [`Protocol`](https://docs.python.org/3/library/typing.html#typing.Protocol) supports the structural interface that separates workflow semantics from the Playwright adapter.
+- **Bounded model actions:** [OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling) documents the typed tool interface used during discovery; replay does not call a model.
+- **Evidence safety:** The [OWASP Logging Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html) informs event selection, sensitive-data exclusion, and tamper-aware production recommendations.

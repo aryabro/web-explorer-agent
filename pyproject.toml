@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "pigeonhole-cua"
+name = "web-explorer-cua"
 version = "0.1.0"
 description = "Discover-once, deterministic computer-use automation"
 readme = "README.md"
@@ -26,13 +26,12 @@ dev = [
 ]
 
 [project.scripts]
-pigeonhole = "pigeonhole.cli:app"
+web-explorer = "web_explorer.cli:app"
 night-window = "target.server:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/pigeonhole", "target"]
+packages = ["src/web_explorer", "target"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-

@@ -9,14 +9,20 @@
         memberId: "12345",
         name: "Marin Finch",
         status: "Active",
+        since: "March 2018",
+        contact: "Email",
         accounts: [
-          { id: "S-4401", product: "Savings", nickname: "Rainy Day", balance: 1842.37 }
+          { id: "S-4401", product: "Savings", nickname: "Rainy Day", balance: 1842.37 },
+          { id: "C-1844", product: "Checking", nickname: "Everyday", balance: 624.08 },
+          { id: "L-2019", product: "Auto Loan", nickname: "Vehicle", balance: -9341.52 }
         ]
       },
       "54321": {
         memberId: "54321",
         name: "Juniper Vale",
         status: "Active",
+        since: "November 2022",
+        contact: "Phone",
         accounts: [
           { id: "S-1190", product: "Savings", nickname: "Nest Egg", balance: 92.14 }
         ]
@@ -25,6 +31,8 @@
         memberId: "99999",
         name: "Restricted Record",
         status: "Restricted",
+        since: "Unavailable",
+        contact: "Unavailable",
         accounts: []
       }
     }
@@ -110,4 +118,3 @@
   };
   ensureLedger();
 })();
-

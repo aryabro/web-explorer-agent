@@ -4,7 +4,7 @@
     "id": "member.read_savings_balance",
     "version": "1.0.0",
     "title": "Read a member's savings balance",
-    "description": "Signs into Night Window, opens a member jacket, and returns the visible current savings balance.",
+    "description": "Signs into Test Bank Operations, opens a member profile, and returns the visible current savings balance.",
     "inputs": {
       "operator_id": {
         "type": "string",
@@ -36,13 +36,27 @@
     "business_outcomes": [
       {
         "code": "MEMBER_NOT_FOUND",
-        "description": "No member jacket exists for the supplied number.",
-        "visible_text": "NO MATCHING MEMBER"
+        "description": "No member profile exists for the supplied number.",
+        "checkpoint": {
+          "id": "outcome-member-not-found",
+          "kind": "visible_text",
+          "expected": "NO MATCHING MEMBER",
+          "frame": "night-work",
+          "timeout_ms": 5000,
+          "role": "intermediate"
+        }
       },
       {
         "code": "PERMISSION_DENIED",
-        "description": "The signed-in operator cannot access the member jacket.",
-        "visible_text": "PERMISSION DENIED"
+        "description": "The signed-in employee cannot access the member profile.",
+        "checkpoint": {
+          "id": "outcome-permission-denied",
+          "kind": "visible_text",
+          "expected": "PERMISSION DENIED",
+          "frame": "night-work",
+          "timeout_ms": 5000,
+          "role": "intermediate"
+        }
       }
     ]
   },
@@ -51,19 +65,22 @@
       "kind": "legacy_web",
       "product": "night-window",
       "product_version": "4.1",
-      "entry_point": "http://127.0.0.1:8765/"
+      "entry_point": "http://127.0.0.1:8765/",
+      "vendor": "training-credit-union",
+      "version_range": "4.x"
     },
     "tenant": "training-bay-17",
     "tenant_overrides": {
       "targets": {},
       "checkpoints": {}
-    }
+    },
+    "fingerprint": "training-credit-union|night-window|4.1|http://127.0.0.1:8765/"
   },
   "execution": {
     "steps": [
       {
         "id": "s1",
-        "intent": "Sign on to the system",
+        "intent": "Enter the runtime operator identifier into the Employee ID field on the staff sign-in form",
         "action": {
           "type": "type",
           "value": {
@@ -72,13 +89,13 @@
           }
         },
         "target": {
-          "description": "Operator code",
+          "description": "Employee ID",
           "strategies": [
             {
               "kind": "semantic",
               "frame": "night-work",
               "role": "textbox",
-              "adjacent_text": "Operator code",
+              "adjacent_text": "Employee ID",
               "element_type": "input"
             },
             {
@@ -93,13 +110,13 @@
             {
               "kind": "geometry",
               "frame": "night-work",
-              "anchor_text": "Operator code",
+              "anchor_text": "Employee ID",
               "element_type": "input",
               "expected_box": {
-                "x": 390.8333435058594,
-                "y": 115.66667175292969,
-                "width": 158.6666717529297,
-                "height": 27.33333396911621
+                "x": 264.3958435058594,
+                "y": 161.25,
+                "width": 210.6666717529297,
+                "height": 34.0
               }
             }
           ]
@@ -110,7 +127,7 @@
       },
       {
         "id": "s2",
-        "intent": "Enter PIN and sign on",
+        "intent": "Enter the runtime sign-on PIN into the Security PIN field on the staff sign-in form",
         "action": {
           "type": "type",
           "value": {
@@ -119,13 +136,13 @@
           }
         },
         "target": {
-          "description": "Brass key (PIN)",
+          "description": "Security PIN",
           "strategies": [
             {
               "kind": "semantic",
               "frame": "night-work",
               "role": "textbox",
-              "adjacent_text": "Brass key (PIN)",
+              "adjacent_text": "Security PIN",
               "element_type": "input"
             },
             {
@@ -140,13 +157,13 @@
             {
               "kind": "geometry",
               "frame": "night-work",
-              "anchor_text": "Brass key (PIN)",
+              "anchor_text": "Security PIN",
               "element_type": "input",
               "expected_box": {
-                "x": 390.8333435058594,
-                "y": 158.33334350585938,
-                "width": 158.6666717529297,
-                "height": 27.33333396911621
+                "x": 264.3958435058594,
+                "y": 213.9166717529297,
+                "width": 210.6666717529297,
+                "height": 34.0
               }
             }
           ]
@@ -157,26 +174,26 @@
       },
       {
         "id": "s3",
-        "intent": "Sign on to the system",
+        "intent": "Submit the staff sign-in form with the entered Employee ID and Security PIN",
         "action": {
           "type": "click"
         },
         "target": {
-          "description": "Turn the key",
+          "description": "Sign in",
           "strategies": [
             {
               "kind": "semantic",
               "frame": "night-work",
               "role": "button",
-              "name": "Turn the key",
-              "adjacent_text": "Turn the key",
+              "name": "Sign in",
+              "adjacent_text": "Sign in",
               "element_type": "button"
             },
             {
               "kind": "structural",
               "frame": "night-work",
               "table_index": 0,
-              "row_index": 2,
+              "row_index": 3,
               "cell_index": 0,
               "element_type": "button",
               "type_index": 0
@@ -184,13 +201,13 @@
             {
               "kind": "geometry",
               "frame": "night-work",
-              "anchor_text": "Turn the key",
+              "anchor_text": "Sign in",
               "element_type": "button",
               "expected_box": {
-                "x": 849.6458740234375,
-                "y": 201.0,
-                "width": 109.35417175292969,
-                "height": 28.666667938232422
+                "x": 645.3333740234375,
+                "y": 319.25,
+                "width": 66.0,
+                "height": 34.0
               }
             }
           ]
@@ -198,18 +215,36 @@
         "checkpoint": {
           "id": "cp3",
           "kind": "visible_text",
-          "expected": "MEMBER PIGEONHOLE / LOOKUP",
-          "timeout_ms": 5000
+          "expected": "MEMBER SERVICES",
+          "frame": "night-work",
+          "timeout_ms": 5000,
+          "role": "intermediate"
         },
         "recover": [
           {
-            "kind": "dismiss_interstitial",
-            "visible_text": "NOTICE FROM RECORDS",
-            "action_text": "Continue lookup"
+            "trigger": {
+              "id": "recover-records-notice",
+              "kind": "visible_text",
+              "expected": "MEMBER INDEX NOTICE",
+              "timeout_ms": 5000,
+              "role": "intermediate"
+            },
+            "strategy": "dismiss",
+            "action_text": "Continue search",
+            "timeout_ms": 2000,
+            "max_attempts": 1
           },
           {
-            "kind": "retry_once",
-            "visible_text": "Index turning..."
+            "trigger": {
+              "id": "recover-index-turning",
+              "kind": "visible_text",
+              "expected": "Searching...",
+              "timeout_ms": 5000,
+              "role": "intermediate"
+            },
+            "strategy": "wait",
+            "timeout_ms": 3000,
+            "max_attempts": 1
           }
         ],
         "risk": "safe",
@@ -217,7 +252,7 @@
       },
       {
         "id": "s4",
-        "intent": "Enter member number and pull pigeonhole",
+        "intent": "Enter the supplied five-digit member number into the Member number search field on the member search form",
         "action": {
           "type": "type",
           "value": {
@@ -239,7 +274,7 @@
               "kind": "structural",
               "frame": "night-work",
               "table_index": 0,
-              "row_index": 0,
+              "row_index": 1,
               "cell_index": 1,
               "element_type": "input",
               "type_index": 0
@@ -250,10 +285,10 @@
               "anchor_text": "Member number",
               "element_type": "input",
               "expected_box": {
-                "x": 390.8333435058594,
-                "y": 115.66667175292969,
-                "width": 110.66667175292969,
-                "height": 27.33333396911621
+                "x": 411.59375,
+                "y": 213.9166717529297,
+                "width": 137.33334350585938,
+                "height": 34.0
               }
             }
           ]
@@ -264,26 +299,26 @@
       },
       {
         "id": "s5",
-        "intent": "Pull the pigeonhole to retrieve member data",
+        "intent": "Submit the member search with the entered member number to open the member record",
         "action": {
           "type": "click"
         },
         "target": {
-          "description": "Pull pigeonhole",
+          "description": "Search members",
           "strategies": [
             {
               "kind": "semantic",
               "frame": "night-work",
               "role": "button",
-              "name": "Pull pigeonhole",
-              "adjacent_text": "Pull pigeonhole",
+              "name": "Search members",
+              "adjacent_text": "Search members",
               "element_type": "button"
             },
             {
               "kind": "structural",
               "frame": "night-work",
               "table_index": 0,
-              "row_index": 2,
+              "row_index": 3,
               "cell_index": 0,
               "element_type": "button",
               "type_index": 0
@@ -291,32 +326,49 @@
             {
               "kind": "geometry",
               "frame": "night-work",
-              "anchor_text": "Pull pigeonhole",
+              "anchor_text": "Search members",
               "element_type": "button",
               "expected_box": {
-                "x": 825.6458740234375,
-                "y": 202.33334350585938,
-                "width": 133.3541717529297,
-                "height": 28.666667938232422
+                "x": 1039.15625,
+                "y": 319.25,
+                "width": 132.17709350585938,
+                "height": 34.0
               }
             }
           ]
         },
         "checkpoint": {
-          "id": "cp5",
+          "id": "cp6",
           "kind": "visible_text",
-          "expected": "SAVINGS BALANCE READY",
-          "timeout_ms": 5000
+          "expected": "Member profile",
+          "timeout_ms": 5000,
+          "role": "postcondition"
         },
         "recover": [
           {
-            "kind": "dismiss_interstitial",
-            "visible_text": "NOTICE FROM RECORDS",
-            "action_text": "Continue lookup"
+            "trigger": {
+              "id": "recover-records-notice",
+              "kind": "visible_text",
+              "expected": "MEMBER INDEX NOTICE",
+              "timeout_ms": 5000,
+              "role": "intermediate"
+            },
+            "strategy": "dismiss",
+            "action_text": "Continue search",
+            "timeout_ms": 2000,
+            "max_attempts": 1
           },
           {
-            "kind": "retry_once",
-            "visible_text": "Index turning..."
+            "trigger": {
+              "id": "recover-index-turning",
+              "kind": "visible_text",
+              "expected": "Searching...",
+              "timeout_ms": 5000,
+              "role": "intermediate"
+            },
+            "strategy": "wait",
+            "timeout_ms": 3000,
+            "max_attempts": 1
           }
         ],
         "risk": "safe",
@@ -324,13 +376,13 @@
       },
       {
         "id": "s6",
-        "intent": "Extract the savings balance from the screen",
+        "intent": "Read the current savings balance shown on the member profile status line in the night-work frame",
         "action": {
           "type": "extract",
           "output": "savings_balance"
         },
         "target": {
-          "description": "sensitive output element (value redacted)",
+          "description": "MEMBER PROFILE READY Current savings balance: [REDACTED]",
           "strategies": [
             {
               "kind": "structural",
@@ -347,7 +399,7 @@
     ],
     "success": {
       "checkpoint_ids": [
-        "cp5"
+        "cp6"
       ],
       "required_outputs": [
         "savings_balance"
@@ -356,8 +408,15 @@
     "fatal_states": [
       {
         "code": "SESSION_EXPIRED",
-        "description": "Night Window ended the authenticated session.",
-        "visible_text": "SESSION EXPIRED"
+        "description": "Test Bank Operations ended the authenticated session.",
+        "checkpoint": {
+          "id": "fatal-session-expired",
+          "kind": "visible_text",
+          "expected": "SESSION EXPIRED",
+          "frame": "night-work",
+          "timeout_ms": 5000,
+          "role": "intermediate"
+        }
       }
     ]
   },
@@ -366,10 +425,10 @@
       "status": "draft"
     },
     "provenance": {
-      "discovered_by": "gemini-3.1-flash-lite",
-      "discovered_at": "2026-09-16T19:58:12.091294Z",
-      "trace_ref": "evidence/discovery-20260916T195717Z-60d257/trace.jsonl",
-      "compiler_version": "pigeonhole-0.1.0"
+      "discovered_by": "z-ai/glm-5.3-flash-20260826",
+      "discovered_at": "2026-09-19T00:08:23.368681Z",
+      "trace_ref": "evidence/discovery-live-read-savings/trace.jsonl",
+      "compiler_version": "web-explorer-0.1.0"
     }
   }
 }
