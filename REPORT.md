@@ -7,10 +7,15 @@ Web Explorer implements the assignment’s central idea: an LLM discovers a work
 ```text
 job + inputs → LLM discovery → verified recording → compiler → draft
 draft → fresh-session qualification → published agent catalog
-caller → agent catalog → deterministic replay → success | outcome | failure | escalated
-                                                                             |
-                                                                             v
-                                                        operator → reconcile → resume
+caller → agent catalog → deterministic replay
+                            ├→ success | outcome | failure
+                            └→ escalated (persisted; headless returns)
+                                          ↓ headed execution
+                                       operator
+                                          ↓
+                              reconcile live checkpoints
+                                          ↓
+                         resume deterministic replay in the same session
 ```
 
 The implementation is one Python process with file-backed artifacts and evidence. Pydantic defines contracts, Playwright drives the browser, FastAPI serves the local target and operator console, and Typer exposes discovery and replay. This keeps the important boundaries visible without introducing queues, databases, or distributed workers.

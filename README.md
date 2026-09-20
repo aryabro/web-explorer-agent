@@ -12,9 +12,11 @@ job + runtime inputs
   -> CAPABILITY CATALOG
 
 agent call -> CAPABILITY CATALOG -> REPLAY (no LLM)
-  -> success | outcome | failure | escalated
-                                      |
-                                      -> operator -> reconcile -> resume
+  -> success | outcome | failure
+  -> escalated (persisted; headless returns)
+       -> headed operator handoff
+       -> reconcile live checkpoints
+       -> resume REPLAY in the same session (no LLM)
 ```
 
 The bundled target is **Test Bank Operations**, a fictional local back-office banking console. It is intentionally inconvenient: frames, nested tables, weak semantics, per-session salted field names, runtime interstitials, session expiry, and a second tenant variant. No real credentials or customer data are used.
