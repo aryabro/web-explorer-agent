@@ -3,41 +3,46 @@
 Web Explorer is a discover-once, replay-many computer-use system for legacy applications that do not expose an API. An LLM operates a real browser during discovery. A compiler turns the verified run into a typed, reviewable capability. Production-style replay executes that capability without an LLM and returns one of four explicit results: `success`, `outcome`, `failure`, or `escalated`.
 
 ```text
-natural-language goal
-        |
-        v
-  DISCOVERY (LLM) ---- redacted trace + recording
-        |
-        v
-  COMPILER ----------- typed capability JSON (draft)
-        |
-        v
-  FRESH-SESSION VALIDATION (qualification, no LLM)
-        |
-        v
-  REPLAY (no LLM) ----- success | outcome | failure | escalated
-                                                    |
-                                                    v
-                                      same-session human handoff
+job + runtime inputs
+  -> DISCOVERY (LLM)
+  -> verified recording
+  -> COMPILER
+  -> draft capability
+  -> QUALIFICATION (fresh browser, no LLM)
+  -> CAPABILITY CATALOG
+
+agent call -> CAPABILITY CATALOG -> REPLAY (no LLM)
+  -> success | outcome | failure | escalated
+                                      |
+                                      -> operator -> reconcile -> resume
 ```
 
 The bundled target is **Test Bank Operations**, a fictional local back-office banking console. It is intentionally inconvenient: frames, nested tables, weak semantics, per-session salted field names, runtime interstitials, session expiry, and a second tenant variant. No real credentials or customer data are used.
 
-## What is implemented
+The end-to-end workflow is:
 
-| Requirement | Implementation |
-| --- | --- |
-| Goal-driven discovery | OpenAI-compatible tool-calling loop over a live Playwright browser |
-| Structured artifact | Strict Pydantic capability schema with contract, compatibility, execution, and governance sections |
-| Deterministic replay | Separate replay engine with no discovery/model dependency and `llm_calls: 0` in every result type |
-| Robust targeting | Semantic, structural, and geometry candidates resolved independently and checked for element identity agreement |
-| Runtime errors | Declared business outcomes, bounded recovery rules, fatal states, typed failure codes, screenshots on failure |
-| Safety | Default-deny origin/path/action policy, runtime risk inference, confirmation for mutation, redaction before model and disk sinks |
-| Human handoff | Fail-closed session lease, intervention evidence, same live Chromium session, checkpoint-based resume |
-| Multi-tenant reuse | Product/version metadata, compatibility fingerprint, sparse tenant target/checkpoint overlays, drift metrics |
-| Agent invocation | Local capability catalog plus OpenAI-style tool definitions |
+1. A YAML job declares the natural-language goal, entry point, typed inputs and outputs, known outcomes, fatal states, recovery rules, and discovery limits.
+2. Discovery sends a bounded, redacted observation to the model. The model chooses one typed action; trusted runtime code validates it, applies policy, acts through the surface adapter, verifies the transition, and records the result.
+3. The compiler accepts only a successful recording with extracted outputs and verified screen transitions, then emits a versioned `draft` capability.
+4. Qualification replays that candidate in a fresh browser with zero model calls. Only a successful candidate is published to `capabilities/`.
+5. Later callers invoke the saved capability by path or catalog ID. Replay resolves recorded targets, executes deterministic actions, checks outcomes and fatal states, applies bounded recovery, verifies checkpoints, and returns a typed result.
+6. If replay cannot safely continue and handoff is enabled, automation pauses and cedes a lease. An operator uses the same browser session; after hand-back, replay derives its resume point from live checkpoints rather than restarting.
 
-This is a focused vertical slice, not a production banking integration. The implemented/cut boundary is documented in [REPORT.md](REPORT.md).
+## Implementation status
+
+| Requirement | Implemented boundary | Proof |
+| --- | --- | --- |
+| Goal-driven discovery | OpenAI-compatible tool-calling loop over a live Playwright browser | [`discovery-result.json`](evidence/discovery-live-read-savings/discovery-result.json) |
+| Structured artifact | Strict Pydantic schema with contract, compatibility, execution, and governance sections | [`member.read_savings_balance.json`](capabilities/member.read_savings_balance.json) |
+| Deterministic replay | Separate replay engine with no discovery/model dependency and `llm_calls: 0` in every result type | [`result.json`](evidence/replay-success-happy-path/result.json) |
+| Robust targeting | Semantic, structural, and geometry candidates must resolve to the same element identity | [`locator_votes`](evidence/replay-success-happy-path/result.json) |
+| Runtime errors | Declared outcomes, bounded recovery, fatal states, typed failures, and failure screenshots | [`evidence/README.md`](evidence/README.md) |
+| Safety | Default-deny policy, trusted risk inference, mutation confirmation, and redaction before model/disk sinks | [`policy.yaml`](policy.yaml) |
+| Human handoff | Fail-closed lease, intervention evidence, same live Chromium session, and checkpoint-based resume | [`replay-success-human-handoff`](evidence/replay-success-human-handoff/) |
+| Multi-tenant reuse | Product/version metadata, sparse semantic/checkpoint overlays, and separate override/drift scores | [`northbay.yaml`](tenants/northbay.yaml) |
+| Agent invocation | Local capability catalog plus OpenAI-style tool definitions | [`catalog.py`](src/web_explorer/catalog.py) |
+
+This is a focused vertical slice, not a production banking integration. Only the Playwright web adapter is implemented; the desktop adapter, authenticated remote operator access, signed governance, immutable evidence store, and fleet services are deliberate cuts documented in [REPORT.md](REPORT.md).
 
 ## Requirements and setup
 
@@ -77,6 +82,8 @@ Create `.env` from `.env.example` using `Copy-Item .env.example .env` on PowerSh
 
 The CLI supplies fictional operator ID `teller7` and the runtime PIN when those declared inputs are omitted. The capability stores input *references*, never the PIN value. Do not commit a real model key.
 
+To review the system without a model or external service, start the bundled target and skip directly to replay in step 3 below. The committed capability, every replay scenario, the validator, and the test suite run without `CUA_LLM_API_KEY`; the tests start the local target automatically.
+
 ## End-to-end demo
 
 ### 1. Start the target
@@ -113,7 +120,7 @@ web-explorer replay \
   --allow-draft
 ```
 
-The replay output has `llm_calls: 0`. `--allow-draft` is an explicit local-development override. To approve the artifact instead:
+The structured result includes `status`, `outputs`, `completed_steps`, locator agreement, tenant override/drift scores, and `llm_calls: 0`. `--allow-draft` is an explicit local-development override. To approve the artifact instead:
 
 ```bash
 web-explorer approve \
@@ -162,7 +169,7 @@ The terminal prints an intervention URL on port `8766` and waits. This idle stat
 1. Keep the replay terminal and Playwright Chromium window open.
 2. Open `http://127.0.0.1:8766` in a separate, regular browser window.
 3. Click **Claim control**.
-4. In the Playwright-controlled Test Bank window, sign in and restore the member profile.
+4. In the Playwright-controlled Test Bank window, sign in as `teller7` with PIN `1937`, then search for member `54321` to restore the member profile.
 5. Return to the operator console and click **Hand back to automation**.
 6. Replay reconciles its cursor from live checkpoints and completes from the restored state; it does not restart the whole flow.
 
@@ -216,9 +223,9 @@ Before an action, discovery harvests up to three independent target descriptions
 2. **Structural**: frame, table/row/cell position, element type, and type index.
 3. **Geometry**: frame, anchor text, element type, and expected box.
 
-Replay resolves every viable strategy and stamps the resulting elements with opaque identities. All resolved candidates must identify the same element. No candidate is `LOCATOR_UNRESOLVED`; disagreement is `LOCATOR_CONFLICT`; one remaining strategy is allowed but recorded as a weak vote. This is intentionally conservative: replay does not click a plurality winner or ask an LLM to guess.
+Replay resolves every viable strategy and stamps the resulting elements with opaque identities. All resolved candidates must identify the same element. If no strategy resolves, replay returns `LOCATOR_UNRESOLVED`; disagreement is `LOCATOR_CONFLICT`; one remaining strategy is allowed but recorded as a weak vote. This is intentionally conservative: replay does not click a plurality winner or ask an LLM to guess.
 
-After each action, replay checks outcomes, fatal states, recoveries, and the step checkpoint. It finally verifies required outputs and the postcondition. The session-storage ledger is only a test oracle and never establishes replay success.
+After each action, replay checks declared outcomes, fatal states, the expected checkpoint, and then any applicable bounded recovery until the checkpoint deadline. It finally verifies required outputs and the postcondition. The session-storage ledger is only a test oracle and never establishes replay success.
 
 ### Safety and evidence
 

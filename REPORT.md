@@ -5,16 +5,19 @@ Web Explorer implements the assignment’s central idea: an LLM discovers a work
 ## 1. Architecture
 
 ```text
-goal → LLM discovery → verified recording → typed capability
-                                              ↓
-agent catalog → deterministic replay → success | outcome | failure | escalated
-                                                               ↓
-                                                  same-session handoff
+job + inputs → LLM discovery → verified recording → compiler → draft
+draft → fresh-session qualification → published agent catalog
+caller → agent catalog → deterministic replay → success | outcome | failure | escalated
+                                                                             |
+                                                                             v
+                                                        operator → reconcile → resume
 ```
 
 The implementation is one Python process with file-backed artifacts and evidence. Pydantic defines contracts, Playwright drives the browser, FastAPI serves the local target and operator console, and Typer exposes discovery and replay. This keeps the important boundaries visible without introducing queues, databases, or distributed workers.
 
-`SurfaceDriver` separates UI perception and action from workflow semantics. Discovery and replay see observations, target bundles, checkpoints, and actions—not Playwright `Page` objects or arbitrary DOM access. A `Capability` is both an agent-facing contract and an executable, reviewable plan. `ReplayResult` is a discriminated union of `success`, expected business `outcome`, automation `failure`, and human `escalated`.
+The runtime path has six explicit stages. A job defines the goal and typed contract. Discovery observes the live surface and asks the model for one bounded action at a time; trusted code validates and executes it. The compiler accepts only successful, verified recordings. Qualification replays the candidate in a fresh browser without a model and publishes it only on success. Production-style invocation loads the capability by path or catalog ID and replays it deterministically. An unrecoverable condition becomes a typed failure or a same-session operator intervention, after which replay reconciles progress from the visible UI before resuming.
+
+`SurfaceDriver` is the principal seam: it separates perception, action, target resolution, checkpoints, screenshots, pause/resume, and human-event capture from workflow semantics. Discovery and replay consume observations, target bundles, and actions—not Playwright `Page` objects or arbitrary DOM access. A `Capability` is both an agent-facing contract and an executable, reviewable plan. `ReplayResult` is a discriminated union of `success`, expected business `outcome`, automation `failure`, and human `escalated`.
 
 Only discovery uses a model. Each turn receives the goal, typed input/output definitions, terminal states, recent actions, runtime feedback, remaining budget, and a bounded frame-aware observation. Sensitive input values, session storage, durable selectors, and browser objects are excluded. Controls have observation-scoped references; stale or invented references are rejected. The runtime—not the model—infers risk, applies policy, harvests durable targets, performs actions, and verifies checkpoints.
 
@@ -37,7 +40,7 @@ A target can contain semantic identity (role/name or adjacent label), structural
 
 Determinism is structural rather than aspirational. The replay import graph is tested to exclude discovery, model configuration, scripted models, and model/network SDKs. Every replay result constrains `llm_calls` to `Literal[0]`. Decisions therefore depend only on the artifact, runtime inputs, policy, tenant profile, and observed surface.
 
-Replay resolves every viable target strategy and compares opaque element identities. No match produces `LOCATOR_UNRESOLVED`; strategies resolving to different elements produce `LOCATOR_CONFLICT`; a single surviving strategy is allowed but recorded as weak. Replay never selects a plurality winner. After each action it checks, in order, declared outcomes, fatal states, the expected checkpoint, an applicable bounded recovery, and timeout. Playwright supplies actionability waiting, while application checkpoints establish semantic readiness.
+Replay resolves every viable target strategy and compares opaque element identities. If no strategy resolves, replay returns `LOCATOR_UNRESOLVED`; strategies resolving to different elements produce `LOCATOR_CONFLICT`; a single surviving strategy is allowed but recorded as weak. Replay never selects a plurality winner. After each action it checks, in order, declared outcomes, fatal states, the expected checkpoint, an applicable bounded recovery, and timeout. Playwright supplies actionability waiting, while application checkpoints establish semantic readiness.
 
 The result taxonomy prevents operational ambiguity:
 
