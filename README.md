@@ -32,7 +32,7 @@ The end-to-end workflow is:
 
 ## Implementation status
 
-| Requirement | Implemented boundary | Proof |
+| System concern | Implemented boundary | Evidence |
 | --- | --- | --- |
 | Goal-driven discovery | OpenAI-compatible tool-calling loop over a live Playwright browser | [`discovery-result.json`](evidence/discovery-live-read-savings/discovery-result.json) |
 | Structured artifact | Strict Pydantic schema with contract, compatibility, execution, and governance sections | [`member.read_savings_balance.json`](capabilities/member.read_savings_balance.json) |
@@ -249,7 +249,7 @@ web-explorer call --id member.read_savings_balance --input member_id=54321 --all
 
 ## Mutating workflow coverage
 
-[`jobs/open_sub_account.yaml`](jobs/open_sub_account.yaml) defines the mutating example. The browser-backed test compiles and replays it with an independent storage oracle, proving that mutation requires `--allow-mutating` and occurs exactly once. A compiled copy is not committed because the previous one came from a scripted development run whose evidence was removed; submitted capability artifacts are now limited to genuine discovery.
+[`jobs/open_sub_account.yaml`](jobs/open_sub_account.yaml) defines the mutating example. The browser-backed test compiles and replays it with an independent storage oracle, proving that mutation requires `--allow-mutating` and occurs exactly once. A compiled copy is not retained because the previous one came from a scripted development run whose evidence was removed; published example capabilities are limited to genuine discovery.
 
 ## Evidence included in this repository
 

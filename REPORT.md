@@ -1,6 +1,10 @@
 # Design Report
 
-Web Explorer implements the assignment’s central idea: an LLM discovers a workflow once, a compiler turns verified behavior into a typed capability, and later executions replay that capability without a model. The system is a focused vertical slice; implemented behavior is tested and unsupported production concerns are listed as cuts.
+Web Explorer turns an unfamiliar browser workflow into a reusable capability. An LLM handles the ambiguity of the first successful run; trusted runtime code verifies and records what happened, a compiler converts that recording into a typed artifact, and later calls replay the artifact without a model.
+
+The goal is reliable computer use against legacy applications that expose a UI but no practical API. Those applications often combine frames, weak semantics, changing field names, tenant differences, session expiry, and consequential actions. A useful system therefore needs more than a browser-driving loop: it needs an explicit contract, durable targeting, deterministic execution, policy enforcement, observable results, and a safe way to stop when automation no longer has enough evidence.
+
+The implementation concentrates on one complete vertical slice rather than a broad collection of partial features. The local banking fixture is deliberately awkward enough to exercise the important boundaries, and each claim is backed by executable tests or recorded evidence. Production concerns that are not implemented are stated as cuts rather than hidden behind abstractions.
 
 ## 1. Architecture
 
@@ -28,9 +32,19 @@ Only discovery uses a model. Each turn receives the goal, typed input/output def
 
 Compilation rejects failed actions, unverified transitions, and missing outputs. A candidate is then replayed without an LLM in a fresh browser before publication. This qualification gate detects accidental reliance on cookies, navigation, or other discovery-session residue. The main trade-off is conservative failure over replay-time improvisation: ambiguity becomes a typed failure or handoff instead of an unreviewed model decision.
 
+This design pays an up-front discovery and qualification cost to make repeated execution simpler and more predictable. Keeping the working core in one process limits deployment scale, but it also makes the trust boundaries, state transitions, and evidence easy to inspect. The surface protocol and serialized capability boundary leave room for other adapters and storage systems without pretending those systems already exist.
+
 ## 2. Artifact schema
 
-Schema version `1.0.0` uses strict Pydantic models with unknown fields forbidden. Its four sections are:
+Artifacts carry information across each trust boundary instead of treating a successful browser session as an opaque transcript:
+
+- A **job** states the human goal, entry point, typed inputs and outputs, expected business outcomes, fatal states, recovery rules, and discovery limits.
+- A **recording** contains only runtime-validated actions and verified transitions from discovery. It is compiler input, not an executable script and not a raw model conversation.
+- A **capability** is the versioned, agent-callable contract and deterministic execution plan produced by the compiler.
+- An **evidence bundle** records the run manifest, redacted event trace, structured result, and any failure or handoff material needed to understand what the system did.
+- An **intervention** preserves the diagnostic, live-session ownership state, and audit metadata when automation cedes control to an operator.
+
+Capability schema version `1.0.0` uses strict Pydantic models with unknown fields forbidden. Its four sections are:
 
 - **Contract:** capability ID/version, descriptions, typed inputs and outputs, sensitivity, and declared business outcomes. This is projected into an agent-callable tool definition.
 - **Compatibility:** surface kind, product/vendor/version, entry point, tenant, sparse overrides, and a fingerprint.
@@ -54,7 +68,7 @@ The result taxonomy prevents operational ambiguity:
 - `failure`: a closed error code with step and diagnostic context.
 - `escalated`: automation stopped and created an operator intervention.
 
-Every run writes a manifest, redacted JSONL trace, and structured result; discovery also records compiler input and model metadata, while failures and handoffs add appropriate screenshots or audit files. Committed scenarios cover normal success, draft denial, business outcome, recovery, session expiry, tenant specialization, and resumed handoff. [`evidence/README.md`](evidence/README.md) is the review index.
+Every run writes a manifest, redacted JSONL trace, and structured result; discovery also records compiler input and model metadata, while failures and handoffs add appropriate screenshots or audit files. Recorded scenarios cover normal success, draft denial, business outcome, recovery, session expiry, tenant specialization, and resumed handoff. [`evidence/README.md`](evidence/README.md) is the evidence index.
 
 ## 4. Heterogeneity & multi-tenant
 
@@ -78,7 +92,7 @@ automation → unowned → operator → automation
 
 Automation and a person never own the browser simultaneously. Lease expiry leaves it unowned. Pausing blocks automation without closing Chromium, preserving cookies, frames, storage, and partial work. The operator claims control through a local console but directly uses the already-open browser, so handoff retains the same live session.
 
-Audit capture records timestamps and click/change metadata but not typed field contents. Capture failure is recorded without stranding a valid hand-back. Resume is based on live checkpoints, not a saved integer: replay scans the page, recalculates the cursor, preserves still-valid prior outputs, removes later invalid outputs, and continues without navigating back to the start. The committed handoff demonstrates session expiry, operator restoration, checkpoint reconciliation, and completion with zero model calls.
+Audit capture records timestamps and click/change metadata but not typed field contents. Capture failure is recorded without stranding a valid hand-back. Resume is based on live checkpoints, not a saved integer: replay scans the page, recalculates the cursor, preserves still-valid prior outputs, removes later invalid outputs, and continues without navigating back to the start. The recorded handoff scenario demonstrates session expiry, operator restoration, checkpoint reconciliation, and completion with zero model calls.
 
 ## 6. Safety
 
@@ -92,7 +106,7 @@ This is not production-grade DLP or governance. Regex redaction can miss formats
 
 ## 7. Cuts
 
-The project deliberately omits a desktop adapter, remote co-browsing proxy, worker fleet, durable lease registry, artifact database, automatic re-authentication, generalized branching/loops, arbitrary artifact code, and model-based replay repair. The catalog is a local file scan, and the target’s browser-delivered test PIN and `sessionStorage` ledger are fixture conveniences—not proposed banking designs.
+The project deliberately omits a desktop adapter, remote co-browsing proxy, worker fleet, durable lease registry, artifact database, automatic re-authentication, generalized branching/loops, arbitrary artifact code, and model-based replay repair. These cuts keep the core claim testable: a verified discovery can become a safe, inspectable artifact that replays deterministically and hands off without losing session state. The catalog is a local file scan, and the target’s browser-delivered test PIN and `sessionStorage` ledger are fixture conveniences—not proposed banking designs.
 
 Next work should prioritize risk: signed governance and immutable evidence; repeated qualification across product versions and tenants; runtime compatibility attestation; then a second surface adapter. Model-assisted repair should remain offline: it may propose a new candidate for review and qualification but must not rewrite a running production replay.
 

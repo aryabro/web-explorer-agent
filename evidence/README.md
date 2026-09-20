@@ -11,9 +11,9 @@ genuine LLM discovery
         -> same-session human handoff and resume
 ```
 
-The directories use scenario names so a reviewer can identify each claim without decoding timestamps. Original execution times remain unchanged in every `manifest.json` and trace event. Renaming the directories did not regenerate or alter the recorded actions.
+The directories use scenario names so each claim can be identified without decoding timestamps. Original execution times remain unchanged in every `manifest.json` and trace event. Renaming the directories did not regenerate or alter the recorded actions.
 
-## Submission evidence
+## Recorded evidence
 
 Read these in order for the shortest review path:
 
@@ -106,4 +106,4 @@ Start the local target:
 python -m target.server
 ```
 
-Then follow the exact commands in [`../README.md`](../README.md), under **End-to-end demo**. New runs use timestamped directory names by default; the friendly names in this directory are curated names for the committed submission evidence.
+Then follow the exact commands in [`../README.md`](../README.md), under **End-to-end demo**. New runs use timestamped directory names by default; the friendly names in this directory identify the retained example evidence.
