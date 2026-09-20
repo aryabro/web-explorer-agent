@@ -19,17 +19,17 @@ Read these in order for the shortest review path:
 
 | Directory | Result | What it demonstrates | Start time (UTC) |
 | --- | --- | --- | --- |
-| [`discovery-live-read-savings`](discovery-live-read-savings/) | Discovery `success` | A genuine model drove the real framed UI, completed six verified actions, extracted `savings_balance`, and called `done` only after independent completion verification | 2026-09-19 00:06:47 |
-| [`qualification-fresh-session`](qualification-fresh-session/) | `success` | The newly compiled draft replayed without an LLM in a fresh browser before publication, ruling out dependence on discovery-session state | 2026-09-19 00:08:23 |
-| [`replay-success-happy-path`](replay-success-happy-path/) | `success` | Normal deterministic execution of all six steps with `llm_calls: 0` | 2026-09-19 00:10:30 |
-| [`replay-failure-draft-approval`](replay-failure-draft-approval/) | `failure / APPROVAL_REQUIRED` | Governance stops an unapproved capability before UI execution when `--allow-draft` is absent | 2026-09-19 01:31:30 |
-| [`replay-outcome-member-not-found`](replay-outcome-member-not-found/) | `outcome / MEMBER_NOT_FOUND` | A declared business answer is returned separately from an automation failure | 2026-09-19 01:41:50 |
-| [`replay-recovery-interstitial`](replay-recovery-interstitial/) | `success` | A known interstitial triggers one bounded dismiss recovery before replay continues | 2026-09-19 01:43:45 |
-| [`replay-failure-session-expired`](replay-failure-session-expired/) | `failure / SESSION_EXPIRED` | Session expiry becomes a typed hard failure when handoff is disabled | 2026-09-19 01:44:52 |
-| [`replay-success-northbay-tenant`](replay-success-northbay-tenant/) | `success` | The base artifact replays against the Northbay tenant through sparse label/checkpoint overrides | 2026-09-19 01:47:05 |
-| [`replay-success-human-handoff`](replay-success-human-handoff/) | `success` | Replay detects session expiry, cedes the same browser to an operator, records human activity, reconciles live checkpoints, and resumes with no LLM | 2026-09-19 03:03:02 |
+| [`discovery-live-read-savings`](discovery-live-read-savings/) | Discovery `success` | A genuine model drove the real framed UI, completed six verified actions, extracted `savings_balance`, and called `done` only after independent completion verification | 2026-09-20 05:15:29 |
+| [`qualification-fresh-session`](qualification-fresh-session/) | `success` | The newly compiled draft replayed without an LLM in a fresh browser before publication, ruling out dependence on discovery-session state | 2026-09-20 05:15:47 |
+| [`replay-success-happy-path`](replay-success-happy-path/) | `success` | Normal deterministic execution of all six steps with `llm_calls: 0` | 2026-09-20 05:16:07 |
+| [`replay-failure-draft-approval`](replay-failure-draft-approval/) | `failure / APPROVAL_REQUIRED` | Governance stops an unapproved capability before UI execution when `--allow-draft` is absent | 2026-09-20 05:16:40 |
+| [`replay-outcome-member-not-found`](replay-outcome-member-not-found/) | `outcome / MEMBER_NOT_FOUND` | A declared business answer is returned separately from an automation failure | 2026-09-20 05:16:42 |
+| [`replay-recovery-interstitial`](replay-recovery-interstitial/) | `success` | A known interstitial triggers one bounded dismiss recovery before replay continues | 2026-09-20 05:16:45 |
+| [`replay-failure-session-expired`](replay-failure-session-expired/) | `failure / SESSION_EXPIRED` | Session expiry becomes a typed hard failure when handoff is disabled | 2026-09-20 05:16:48 |
+| [`replay-success-northbay-tenant`](replay-success-northbay-tenant/) | `success` | The base artifact replays against the Northbay tenant through sparse label/checkpoint overrides | 2026-09-20 05:16:51 |
+| [`replay-success-human-handoff`](replay-success-human-handoff/) | `success` | Replay detects session expiry, cedes the same browser to an operator, records human activity, reconciles live checkpoints, and resumes with no LLM | 2026-09-20 05:17:35 |
 
-The genuine discovery made eight model calls: six successful UI actions, one or more state-dependent decisions, and the final `done` decision. The compiled artifact contains six executable steps. Model-call count and step count are therefore intentionally different.
+The genuine discovery made seven model calls: six successful UI actions and the final `done` decision. The compiled artifact contains the same six executable actions; the final model call records completion rather than another browser step.
 
 Only genuine discovery and replay runs are retained here. Deterministic model doubles remain test-only utilities and do not generate committed evidence.
 

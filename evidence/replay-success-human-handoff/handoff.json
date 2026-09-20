@@ -1,6 +1,6 @@
 {
   "holder": "automation",
-  "operator_id": "local-operator",
+  "operator_id": "fresh-evidence-operator",
   "capability_id": "member.read_savings_balance",
   "goal": "Signs into Test Bank Operations, opens a member profile, and returns the visible current savings balance.",
   "reason": {
@@ -12,49 +12,35 @@
   },
   "human_events": [
     {
-      "at": "2026-09-19T03:04:16.377Z",
-      "event": "click",
-      "tag": "input",
-      "input_type": null,
-      "visible_text": ""
-    },
-    {
-      "at": "2026-09-19T03:04:22.602Z",
+      "at": "2026-09-20T05:17:36.713Z",
       "event": "change",
       "tag": "input",
       "input_type": null,
       "visible_text": null
     },
     {
-      "at": "2026-09-19T03:04:28.899Z",
+      "at": "2026-09-20T05:17:36.744Z",
       "event": "change",
       "tag": "input",
       "input_type": "password",
       "visible_text": null
     },
     {
-      "at": "2026-09-19T03:04:29.082Z",
+      "at": "2026-09-20T05:17:36.744Z",
       "event": "click",
       "tag": "button",
       "input_type": null,
       "visible_text": "Sign in"
     },
     {
-      "at": "2026-09-19T03:04:36.413Z",
-      "event": "click",
-      "tag": "input",
-      "input_type": null,
-      "visible_text": ""
-    },
-    {
-      "at": "2026-09-19T03:04:39.673Z",
+      "at": "2026-09-20T05:17:36.811Z",
       "event": "change",
       "tag": "input",
       "input_type": null,
       "visible_text": null
     },
     {
-      "at": "2026-09-19T03:04:39.787Z",
+      "at": "2026-09-20T05:17:36.812Z",
       "event": "click",
       "tag": "button",
       "input_type": null,
@@ -62,7 +48,7 @@
     }
   ],
   "human_capture_error": null,
-  "intervention_id": "e8f382af7dde",
-  "returned_at": "2026-09-19T03:05:05.316596+00:00",
-  "note": ""
+  "intervention_id": "71de8ee9534a",
+  "returned_at": "2026-09-20T05:17:36.855616+00:00",
+  "note": "Restored the member profile in the existing browser session."
 }

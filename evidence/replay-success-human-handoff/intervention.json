@@ -1,5 +1,5 @@
 {
-  "id": "e8f382af7dde",
+  "id": "71de8ee9534a",
   "capability_id": "member.read_savings_balance",
   "goal": "Signs into Test Bank Operations, opens a member profile, and returns the visible current savings balance.",
   "diagnostic": {
@@ -10,8 +10,8 @@
     "observed": "SESSION EXPIRED"
   },
   "step_id": "s5",
-  "raised_at": "2026-09-19T03:03:19.694490Z",
+  "raised_at": "2026-09-20T05:17:36.655485Z",
   "status": "returned",
-  "operator_id": "local-operator",
-  "note": ""
+  "operator_id": "fresh-evidence-operator",
+  "note": "Restored the member profile in the existing browser session."
 }

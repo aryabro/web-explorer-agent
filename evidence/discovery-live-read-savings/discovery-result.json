@@ -5,12 +5,12 @@
     "goal": "Sign in, find the supplied member number, and read the current savings balance.",
     "target": "http://127.0.0.1:8765/",
     "model": "z-ai/glm-5.3-flash-[REDACTED]",
-    "started_at": "2026-09-19T00:06:48.025470Z",
-    "completed_at": "2026-09-19T00:08:23.368681Z",
+    "started_at": "2026-09-20T05:15:29.484766Z",
+    "completed_at": "2026-09-20T05:15:47.103969Z",
     "steps": [
       {
         "id": "s1",
-        "intent": "Enter the runtime operator identifier into the Employee ID field on the staff sign-in form",
+        "intent": "Enter the operator's employee ID into the sign-in form",
         "action": {
           "type": "type",
           "value": {
@@ -43,9 +43,9 @@
               "anchor_text": "Employee ID",
               "element_type": "input",
               "expected_box": {
-                "x": 264.3958435058594,
-                "y": 161.25,
-                "width": 210.6666717529297,
+                "x": 264.515625,
+                "y": 161.578125,
+                "width": 204.0,
                 "height": 34.0
               }
             }
@@ -59,7 +59,7 @@
       },
       {
         "id": "s2",
-        "intent": "Enter the runtime sign-on PIN into the Security PIN field on the staff sign-in form",
+        "intent": "Enter the security PIN to complete the staff sign-in form",
         "action": {
           "type": "type",
           "value": {
@@ -92,9 +92,9 @@
               "anchor_text": "Security PIN",
               "element_type": "input",
               "expected_box": {
-                "x": 264.3958435058594,
-                "y": 213.9166717529297,
-                "width": 210.6666717529297,
+                "x": 264.515625,
+                "y": 214.578125,
+                "width": 204.0,
                 "height": 34.0
               }
             }
@@ -108,7 +108,7 @@
       },
       {
         "id": "s3",
-        "intent": "Submit the staff sign-in form with the entered Employee ID and Security PIN",
+        "intent": "Submit the completed staff sign-in form to authenticate",
         "action": {
           "type": "click"
         },
@@ -138,9 +138,9 @@
               "anchor_text": "Sign in",
               "element_type": "button",
               "expected_box": {
-                "x": 645.3333740234375,
-                "y": 319.25,
-                "width": 66.0,
+                "x": 644.328125,
+                "y": 320.578125,
+                "width": 66.671875,
                 "height": 34.0
               }
             }
@@ -149,8 +149,7 @@
         "checkpoint": {
           "id": "cp3",
           "kind": "visible_text",
-          "expected": "MEMBER SERVICES",
-          "frame": "night-work",
+          "expected": "Member search",
           "timeout_ms": 5000,
           "role": "intermediate"
         },
@@ -186,11 +185,11 @@
         "after_digest": "86d590bf84fc0bb5",
         "execution_status": "succeeded",
         "checkpoint_verified": true,
-        "checkpoint_source": "derived"
+        "checkpoint_source": "model"
       },
       {
         "id": "s4",
-        "intent": "Enter the supplied five-digit member number into the Member number search field on the member search form",
+        "intent": "Enter the supplied member number into the member number search field",
         "action": {
           "type": "type",
           "value": {
@@ -223,9 +222,9 @@
               "anchor_text": "Member number",
               "element_type": "input",
               "expected_box": {
-                "x": 411.59375,
-                "y": 213.9166717529297,
-                "width": 137.33334350585938,
+                "x": 411.71875,
+                "y": 214.578125,
+                "width": 134.0,
                 "height": 34.0
               }
             }
@@ -239,7 +238,7 @@
       },
       {
         "id": "s5",
-        "intent": "Submit the member search with the entered member number to open the member record",
+        "intent": "Submit the member search with the entered member number to locate the member record",
         "action": {
           "type": "click"
         },
@@ -269,16 +268,16 @@
               "anchor_text": "Search members",
               "element_type": "button",
               "expected_box": {
-                "x": 1039.15625,
-                "y": 319.25,
-                "width": 132.17709350585938,
+                "x": 1038.15625,
+                "y": 320.578125,
+                "width": 132.84375,
                 "height": 34.0
               }
             }
           ]
         },
         "checkpoint": {
-          "id": "cp6",
+          "id": "cp5",
           "kind": "visible_text",
           "expected": "Member profile",
           "timeout_ms": 5000,
@@ -320,7 +319,7 @@
       },
       {
         "id": "s6",
-        "intent": "Read the current savings balance shown on the member profile status line in the night-work frame",
+        "intent": "Read the current savings balance displayed on the member profile into the required output",
         "action": {
           "type": "extract",
           "output": "savings_balance"
@@ -352,5 +351,5 @@
   "outputs": {
     "savings_balance": "[REDACTED]"
   },
-  "llm_calls": 8
+  "llm_calls": 7
 }

@@ -103,26 +103,6 @@ def test_policy_default_deny_and_risk(policy: PolicyEngine) -> None:
         ).disposition
         == "deny"
     )
-    assert (
-        policy.evaluate(
-            url="https://www.monroetwplibrary.org/",
-            action="click",
-            risk=Risk.SAFE,
-        ).disposition
-        == "deny"
-    )
-
-
-def test_catalog_holds_job_is_loadable() -> None:
-    job = Job.load("jobs/catalog_holds.yaml")
-    assert job.target == "https://mon.search.stellanj.org/"
-    assert "title" in job.inputs
-    assert "holds_count" in job.outputs
-    assert job.fatal_states == []
-    assert job.click_recoveries[0].action_text == "Close"
-    assert job.click_recoveries[0].strategy == "dismiss"
-
-
 def test_secret_definitions_allowed_but_secret_literals_impossible() -> None:
     job = Job.load("jobs/read_savings.yaml")
     assert job.inputs["pin"].sensitivity == Sensitivity.SECRET

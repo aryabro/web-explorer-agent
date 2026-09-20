@@ -249,7 +249,7 @@ web-explorer call --id member.read_savings_balance --input member_id=54321 --all
 
 ## Mutating workflow coverage
 
-[`jobs/open_sub_account.yaml`](jobs/open_sub_account.yaml) defines the mutating example. The browser-backed test compiles and replays it with an independent storage oracle, proving that mutation requires `--allow-mutating` and occurs exactly once. A compiled copy is not retained because the previous one came from a scripted development run whose evidence was removed; published example capabilities are limited to genuine discovery.
+[`jobs/open_sub_account.yaml`](jobs/open_sub_account.yaml) defines the mutating example. The browser-backed test compiles and replays it with an independent storage oracle, proving that mutation requires `--allow-mutating` and occurs exactly once. This workflow is retained as safety coverage rather than as a published capability; published example capabilities are backed by genuine discovery evidence.
 
 ## Evidence included in this repository
 
@@ -276,7 +276,7 @@ python -m pytest
 python scripts/validate_repository.py
 ```
 
-The suite currently collects 46 tests. Important coverage includes frame-aware readiness, real-browser discovery/compile/replay, invocation and output typing, artifact action/output invariants, post-action redirect policy, outcome and recovery paths, mutating policy, locator conflict, stale observation refs, compiler invariants, tenant overlays, draft approval, handoff-file redaction, lease expiry, capture failure during hand-back, and same-session checkpoint resume. The repository validator separately checks committed capability schemas, provenance paths, evidence JSON/JSONL, run-directory identities, job definitions, and catalog freshness.
+The suite currently collects 45 tests. Important coverage includes frame-aware readiness, real-browser discovery/compile/replay, invocation and output typing, artifact action/output invariants, post-action redirect policy, outcome and recovery paths, mutating policy, locator conflict, stale observation refs, compiler invariants, tenant overlays, draft approval, handoff-file redaction, lease expiry, capture failure during hand-back, and same-session checkpoint resume. The repository validator separately checks committed capability schemas, provenance paths, evidence JSON/JSONL, run-directory identities, job definitions, and catalog freshness.
 
 GitHub Actions runs the validator and the complete suite with Playwright Chromium on Python 3.12. Docker is intentionally not required: tests start the local FastAPI target in-process, while the automation controls a runner-local browser. Containerizing either side would add networking and browser-handoff complexity without strengthening the boundary under test.
 
