@@ -40,16 +40,9 @@ class PolicyEngine:
         risk: Risk | str,
         intent: str = "",
     ) -> PolicyDecision:
-        parsed = urlparse(url)
-        origin = f"{parsed.scheme}://{parsed.netloc}"
-        if origin not in self.document["allowed_origins"]:
-            return PolicyDecision(
-                disposition="deny", reason=f"origin is not allowlisted: {origin}"
-            )
-        if not self._path_allowed(parsed.path):
-            return PolicyDecision(
-                disposition="deny", reason=f"path is not allowlisted: {parsed.path}"
-            )
+        location = self.evaluate_location(url)
+        if location.disposition == "deny":
+            return location
         if action not in self.document["allowed_actions"]:
             return PolicyDecision(
                 disposition="deny", reason=f"action is not allowlisted: {action}"
@@ -63,6 +56,22 @@ class PolicyEngine:
         return PolicyDecision(
             disposition=disposition,
             reason=f"{risk} actions are configured as {disposition}",
+        )
+
+    def evaluate_location(self, url: str) -> PolicyDecision:
+        """Check only whether a currently observed location is allowlisted."""
+        parsed = urlparse(url)
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+        if origin not in self.document["allowed_origins"]:
+            return PolicyDecision(
+                disposition="deny", reason=f"origin is not allowlisted: {origin}"
+            )
+        if not self._path_allowed(parsed.path):
+            return PolicyDecision(
+                disposition="deny", reason=f"path is not allowlisted: {parsed.path}"
+            )
+        return PolicyDecision(
+            disposition="allow", reason="location is allowlisted"
         )
 
     def infer_risk(

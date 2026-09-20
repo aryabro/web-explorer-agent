@@ -51,13 +51,13 @@ Capability schema version `1.0.0` uses strict Pydantic models with unknown field
 - **Execution:** ordered steps containing intent, action, input/literal value source, target bundle, checkpoint, bounded recovery, risk, and timeout. Success names required outputs and final checkpoints; fatal states remain separate from business outcomes.
 - **Governance:** draft/approved/deprecated status plus discovery model, timestamp, trace reference, and compiler version. Draft replay requires an explicit development override.
 
-Cross-field validation rejects duplicate step IDs, unknown input/output references, missing success checkpoints, and secret literal values. Runtime secrets are represented as input references rather than embedded data.
+Cross-field validation rejects duplicate step IDs, unknown input/output references, missing success checkpoints, action shapes that cannot execute, and required outputs that no extraction step can produce. Runtime secrets are represented as input references rather than embedded data.
 
 A target can contain semantic identity (role/name or adjacent label), structural identity (frame and table/control position), and geometric identity (anchor and expected box). Discovery harvests these before an action because navigation can destroy the original document. Sensitive extraction targets retain only safe structural information. The artifact deliberately excludes JavaScript, arbitrary CSS/XPath, loops, and model prompts; variation is represented through typed outcomes, fatal states, tenant overlays, and bounded recovery rules.
 
 ## 3. Determinism & error handling
 
-Determinism is structural rather than aspirational. The replay import graph is tested to exclude discovery, model configuration, scripted models, and model/network SDKs. Every replay result constrains `llm_calls` to `Literal[0]`. Decisions therefore depend only on the artifact, runtime inputs, policy, tenant profile, and observed surface.
+Determinism is structural rather than aspirational. The replay import graph is tested to exclude discovery, model configuration, scripted models, and model/network SDKs. Every replay result constrains `llm_calls` to `Literal[0]`. Decisions therefore depend only on the artifact, runtime inputs, policy, tenant profile, and observed surface. Replay validates required, unexpected, and incorrectly typed inputs before navigation, and validates produced output types before returning success.
 
 Replay resolves every viable target strategy and compares opaque element identities. If no strategy resolves, replay returns `LOCATOR_UNRESOLVED`; strategies resolving to different elements produce `LOCATOR_CONFLICT`; a single surviving strategy is allowed but recorded as weak. Replay never selects a plurality winner. After each action it checks, in order, declared outcomes, fatal states, the expected checkpoint, an applicable bounded recovery, and timeout. Playwright supplies actionability waiting, while application checkpoints establish semantic readiness.
 
@@ -65,7 +65,7 @@ The result taxonomy prevents operational ambiguity:
 
 - `success`: outputs exist and the final visible condition holds.
 - `outcome`: a valid business answer such as `MEMBER_NOT_FOUND`.
-- `failure`: a closed error code with step and diagnostic context.
+- `failure`: a closed error code with step and diagnostic context, including `INPUT_INVALID`, `OUTPUT_MISSING`, and `OUTPUT_INVALID` contract failures.
 - `escalated`: automation stopped and created an operator intervention.
 
 Every run writes a manifest, redacted JSONL trace, and structured result; discovery also records compiler input and model metadata, while failures and handoffs add appropriate screenshots or audit files. Recorded scenarios cover normal success, draft denial, business outcome, recovery, session expiry, tenant specialization, and resumed handoff. [`evidence/README.md`](evidence/README.md) is the evidence index.
@@ -92,11 +92,11 @@ automation → unowned → operator → automation
 
 Automation and a person never own the browser simultaneously. Lease expiry leaves it unowned. Pausing blocks automation without closing Chromium, preserving cookies, frames, storage, and partial work. The operator claims control through a local console but directly uses the already-open browser, so handoff retains the same live session.
 
-Audit capture records timestamps and click/change metadata but not typed field contents. Capture failure is recorded without stranding a valid hand-back. Resume is based on live checkpoints, not a saved integer: replay scans the page, recalculates the cursor, preserves still-valid prior outputs, removes later invalid outputs, and continues without navigating back to the start. The recorded handoff scenario demonstrates session expiry, operator restoration, checkpoint reconciliation, and completion with zero model calls.
+Audit capture records timestamps and click/change metadata but not typed field contents. Intervention diagnostics, human-event metadata, and operator notes pass through the same redactor as other evidence before either handoff file is written. Capture failure is recorded without stranding a valid hand-back. Resume is based on live checkpoints, not a saved integer: replay scans the page, recalculates the cursor, preserves still-valid prior outputs, removes later invalid outputs, and continues without navigating back to the start. The recorded handoff scenario demonstrates session expiry, operator restoration, checkpoint reconciliation, and completion with zero model calls.
 
 ## 6. Safety
 
-`policy.yaml` is default-deny over origins, paths, actions, intent patterns, and risk dispositions. Entry navigation is checked before opening a site, navigation checks its destination, and discovery also checks post-action redirects. Discovery and replay share this policy engine.
+`policy.yaml` is default-deny over origins, paths, actions, intent patterns, and risk dispositions. Entry navigation is checked before opening a site, planned navigation is checked against its destination, and both discovery and replay recheck the observed location after an action. An unexpected redirect therefore fails immediately, including after the final action. Discovery and replay share this policy engine.
 
 Risk is inferred from the selected control and action by trusted code; a model cannot label a “Confirm and create” action as safe. Safe actions are allowed, mutating actions require explicit confirmation, and irreversible actions are denied. Replay also enforces approval state and a step budget. A browser-backed mutating test uses independent storage state to verify exactly one change.
 

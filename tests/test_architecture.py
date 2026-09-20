@@ -4,15 +4,23 @@ import ast
 from pathlib import Path
 
 import pytest
+import typer
 
+from web_explorer.cli import _runtime_inputs
 from web_explorer.compiler import Job
 from web_explorer.contracts import (
+    Action,
+    Capability,
     EscalatedResult,
     FailureResult,
+    InputValue,
     OutcomeResult,
+    Parameter,
     Recovery,
+    Step,
     SuccessResult,
 )
+from web_explorer.replay import load_capability
 from web_explorer.surface.base import SurfaceResolutionError
 from web_explorer.surface.playwright import PlaywrightSurface
 from web_explorer.surface.resolution import vote_identities
@@ -119,6 +127,69 @@ def test_recovery_legacy_and_structured_shapes() -> None:
     job = Job.load("jobs/read_savings.yaml")
     assert job.click_recoveries[0].strategy == "dismiss"
     assert job.click_recoveries[1].timeout_ms == 3000
+
+
+def test_capability_requires_success_outputs_to_be_produced() -> None:
+    capability = load_capability("capabilities/member.read_savings_balance.json")
+    payload = capability.model_dump(mode="json")
+    payload["execution"]["steps"] = [
+        step
+        for step in payload["execution"]["steps"]
+        if step["action"].get("output") != "savings_balance"
+    ]
+    with pytest.raises(ValueError, match="required outputs are not produced"):
+        Capability.model_validate(payload)
+
+
+def test_capability_requires_declared_required_outputs_on_success() -> None:
+    capability = load_capability("capabilities/member.read_savings_balance.json")
+    payload = capability.model_dump(mode="json")
+    payload["execution"]["success"]["required_outputs"] = []
+    with pytest.raises(ValueError, match="absent from the success condition"):
+        Capability.model_validate(payload)
+
+
+def test_step_rejects_internally_invalid_action_shapes() -> None:
+    capability = load_capability("capabilities/member.read_savings_balance.json")
+    target = capability.execution.steps[0].target
+    assert target is not None
+
+    with pytest.raises(ValueError, match="extract action requires an output"):
+        Step(id="extract", intent="extract", action=Action(type="extract"), target=target)
+    with pytest.raises(ValueError, match="click action cannot write an output"):
+        Step(
+            id="click",
+            intent="click",
+            action=Action(type="click", output="savings_balance"),
+            target=target,
+        )
+    with pytest.raises(ValueError, match="type action requires a value"):
+        Step(id="type", intent="type", action=Action(type="type"), target=target)
+    with pytest.raises(ValueError, match="navigate action requires a value"):
+        Step(id="navigate", intent="navigate", action=Action(type="navigate"))
+    with pytest.raises(ValueError, match="click action requires a target"):
+        Step(id="target", intent="click", action=Action(type="click"))
+
+    valid = Step(
+        id="valid",
+        intent="type",
+        action=Action(type="type", value=InputValue(name="member_id")),
+        target=target,
+    )
+    assert valid.action.type == "type"
+
+
+def test_cli_parses_declared_number_and_boolean_inputs() -> None:
+    definitions = {
+        "count": Parameter(type="number", description="count"),
+        "enabled": Parameter(type="boolean", description="enabled"),
+    }
+    assert _runtime_inputs(["count=2.5", "enabled=true"], definitions) == {
+        "count": 2.5,
+        "enabled": True,
+    }
+    with pytest.raises(typer.BadParameter, match="unexpected inputs: extra"):
+        _runtime_inputs(["count=2", "enabled=false", "extra=no"], definitions)
 
 
 @pytest.mark.asyncio

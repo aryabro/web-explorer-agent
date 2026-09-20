@@ -34,6 +34,7 @@ class FailureCode(StrEnum):
     INPUT_INVALID = "INPUT_INVALID"
     SESSION_EXPIRED = "SESSION_EXPIRED"
     OUTPUT_MISSING = "OUTPUT_MISSING"
+    OUTPUT_INVALID = "OUTPUT_INVALID"
     SUCCESS_CONDITION_FAILED = "SUCCESS_CONDITION_FAILED"
     ACTION_FAILED = "ACTION_FAILED"
     APPROVAL_REQUIRED = "APPROVAL_REQUIRED"
@@ -259,6 +260,24 @@ class Step(StrictModel):
     risk: Risk = Risk.SAFE
     timeout_ms: int = Field(default=5000, ge=100, le=60000)
 
+    @model_validator(mode="after")
+    def validate_action_shape(self) -> "Step":
+        action = self.action
+        targeted = {"click", "type", "select", "extract", "dismiss"}
+        if action.type in targeted and self.target is None:
+            raise ValueError(f"{action.type} action requires a target")
+        if action.type in {"navigate", "wait"} and self.target is not None:
+            raise ValueError(f"{action.type} action cannot have a target")
+        if action.type in {"navigate", "type", "select"} and action.value is None:
+            raise ValueError(f"{action.type} action requires a value")
+        if action.type in {"click", "extract", "dismiss"} and action.value is not None:
+            raise ValueError(f"{action.type} action cannot have a value")
+        if action.type == "extract" and action.output is None:
+            raise ValueError("extract action requires an output")
+        if action.type != "extract" and action.output is not None:
+            raise ValueError(f"{action.type} action cannot write an output")
+        return self
+
 
 class SuccessCondition(StrictModel):
     checkpoint_ids: list[str]
@@ -322,6 +341,30 @@ class Capability(StrictModel):
         )
         if missing_outputs:
             raise ValueError(f"unknown required outputs: {sorted(missing_outputs)}")
+        declared_required_outputs = {
+            name for name, parameter in self.contract.outputs.items() if parameter.required
+        }
+        unrequired_by_success = declared_required_outputs - set(
+            self.execution.success.required_outputs
+        )
+        if unrequired_by_success:
+            raise ValueError(
+                "declared required outputs are absent from the success condition: "
+                f"{sorted(unrequired_by_success)}"
+            )
+        produced_outputs = {
+            step.action.output
+            for step in self.execution.steps
+            if step.action.output is not None
+        }
+        unproduced_outputs = (
+            set(self.execution.success.required_outputs) - produced_outputs
+        )
+        if unproduced_outputs:
+            raise ValueError(
+                "required outputs are not produced by any step: "
+                f"{sorted(unproduced_outputs)}"
+            )
         for step in self.execution.steps:
             value = step.action.value
             if isinstance(value, InputValue) and value.name not in self.contract.inputs:

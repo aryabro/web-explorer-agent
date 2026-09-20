@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,6 +18,7 @@ from web_explorer.contracts import (
     LiteralValue,
     LocatorVoteRecord,
     OutcomeResult,
+    Parameter,
     ReplayResult,
     Risk,
     Step,
@@ -29,6 +31,86 @@ from web_explorer.surface.base import SurfaceDriver, SurfaceResolutionError
 from web_explorer.tenants import compatibility_fingerprint
 
 EscalatedCallback = Callable[[EscalatedResult], Awaitable[None]]
+
+
+def _value_type(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, float) and not math.isfinite(value):
+        return "non-finite number"
+    if isinstance(value, (int, float)):
+        return "number"
+    if isinstance(value, dict):
+        return "object"
+    if isinstance(value, (list, tuple)):
+        return "array"
+    return type(value).__name__
+
+
+def _matches_parameter(parameter: Parameter, value: Any) -> bool:
+    observed = _value_type(value)
+    return observed == parameter.type
+
+
+def validate_invocation_inputs(
+    definitions: dict[str, Parameter], inputs: dict[str, Any]
+) -> StepDiagnostic | None:
+    missing = sorted(
+        name
+        for name, definition in definitions.items()
+        if definition.required and name not in inputs
+    )
+    if missing:
+        return StepDiagnostic(
+            code=FailureCode.INPUT_INVALID,
+            message=f"missing required inputs: {', '.join(missing)}",
+            expected=", ".join(sorted(definitions)),
+            observed=", ".join(sorted(inputs)),
+        )
+    unexpected = sorted(set(inputs) - set(definitions))
+    if unexpected:
+        return StepDiagnostic(
+            code=FailureCode.INPUT_INVALID,
+            message=f"unexpected inputs: {', '.join(unexpected)}",
+            expected=", ".join(sorted(definitions)),
+            observed=", ".join(sorted(inputs)),
+        )
+    for name, value in inputs.items():
+        parameter = definitions[name]
+        if not _matches_parameter(parameter, value):
+            return StepDiagnostic(
+                code=FailureCode.INPUT_INVALID,
+                message=f"input {name!r} has the wrong type",
+                expected=parameter.type,
+                observed=_value_type(value),
+            )
+    return None
+
+
+def _validate_outputs(
+    definitions: dict[str, Parameter], outputs: dict[str, Any]
+) -> StepDiagnostic | None:
+    for name, value in outputs.items():
+        parameter = definitions.get(name)
+        if parameter is None:
+            return StepDiagnostic(
+                code=FailureCode.OUTPUT_INVALID,
+                message=f"replay produced undeclared output {name!r}",
+                expected=", ".join(sorted(definitions)),
+                observed=name,
+            )
+        if not _matches_parameter(parameter, value):
+            return StepDiagnostic(
+                code=FailureCode.OUTPUT_INVALID,
+                message=f"output {name!r} has the wrong type",
+                expected=parameter.type,
+                observed=_value_type(value),
+            )
+    return None
 
 
 @dataclass
@@ -68,6 +150,9 @@ class ReplayEngine:
         inputs: dict[str, Any],
     ) -> ReplayResult | None:
         """Policy-check then navigate to the capability entry point."""
+        invalid_inputs = validate_invocation_inputs(capability.contract.inputs, inputs)
+        if invalid_inputs is not None:
+            return await self._failure(invalid_inputs, [], inputs, [])
         url = capability.compatibility.surface.entry_point
         blocked = await self._policy_gate(
             url=url,
@@ -80,7 +165,14 @@ class ReplayEngine:
         if blocked is not None:
             return blocked
         await self.surface.act("navigate", value=url)
-        return None
+        observation = await self.surface.observe()
+        return await self._location_gate(
+            url=observation.url,
+            phase="entry_destination",
+            inputs=inputs,
+            completed=[],
+            votes=[],
+        )
 
     async def run(
         self,
@@ -119,17 +211,10 @@ class ReplayEngine:
         navigate: bool,
     ) -> ReplayResult:
         votes: list[LocatorVoteRecord] = list(cursor.votes)
-        missing = [
-            name
-            for name, definition in capability.contract.inputs.items()
-            if definition.required and name not in inputs
-        ]
-        if missing:
+        invalid_inputs = validate_invocation_inputs(capability.contract.inputs, inputs)
+        if invalid_inputs is not None:
             return await self._failure(
-                StepDiagnostic(
-                    code=FailureCode.INPUT_INVALID,
-                    message=f"missing required inputs: {', '.join(missing)}",
-                ),
+                invalid_inputs,
                 [],
                 inputs,
                 votes,
@@ -310,6 +395,18 @@ class ReplayEngine:
                     votes,
                 )
 
+            after = await self.surface.observe()
+            blocked = await self._location_gate(
+                url=after.url,
+                phase="post_action_destination",
+                inputs=inputs,
+                completed=completed,
+                votes=votes,
+                step_id=step.id,
+            )
+            if blocked is not None:
+                return blocked
+
             if step.action.output:
                 outputs[step.action.output] = extracted
             completed.append(step.id)
@@ -348,6 +445,24 @@ class ReplayEngine:
                 inputs,
                 votes,
             )
+        invalid_outputs = _validate_outputs(capability.contract.outputs, outputs)
+        if invalid_outputs is not None:
+            return await self._failure(
+                invalid_outputs,
+                completed,
+                inputs,
+                votes,
+            )
+        final_observation = await self.surface.observe()
+        blocked = await self._location_gate(
+            url=final_observation.url,
+            phase="final_destination",
+            inputs=inputs,
+            completed=completed,
+            votes=votes,
+        )
+        if blocked is not None:
+            return blocked
         for checkpoint_id in capability.execution.success.checkpoint_ids:
             checkpoint = next(
                 (
@@ -449,7 +564,18 @@ class ReplayEngine:
         deadline = asyncio.get_running_loop().time() + timeout_ms / 1000
         attempts = [0] * len(step.recover)
         while True:
-            await self.surface.observe()
+            observation = await self.surface.observe()
+            blocked = await self._location_gate(
+                url=observation.url,
+                phase="settle_destination",
+                inputs=inputs,
+                completed=completed,
+                votes=votes,
+                step_id=step.id,
+                record_allowed=False,
+            )
+            if blocked is not None:
+                return blocked
             outcome = await self._detect_outcome(capability)
             if outcome:
                 return await self._outcome(outcome, completed, votes)
@@ -499,7 +625,19 @@ class ReplayEngine:
             if asyncio.get_running_loop().time() >= deadline:
                 break
             await asyncio.sleep(0.1)
-        observed = (await self.surface.observe()).visible_text[-1000:]
+        final_observation = await self.surface.observe()
+        blocked = await self._location_gate(
+            url=final_observation.url,
+            phase="checkpoint_timeout_destination",
+            inputs=inputs,
+            completed=completed,
+            votes=votes,
+            step_id=step.id,
+            record_allowed=False,
+        )
+        if blocked is not None:
+            return blocked
+        observed = final_observation.visible_text[-1000:]
         outcome = await self._detect_outcome(capability)
         if outcome:
             return await self._outcome(outcome, completed, votes)
@@ -688,6 +826,42 @@ class ReplayEngine:
                 votes,
             )
         return None
+
+    async def _location_gate(
+        self,
+        *,
+        url: str,
+        phase: str,
+        inputs: dict[str, Any],
+        completed: list[str],
+        votes: list[LocatorVoteRecord],
+        step_id: str | None = None,
+        record_allowed: bool = True,
+    ) -> ReplayResult | None:
+        decision = self.policy.evaluate_location(url)
+        if record_allowed or decision.disposition == "deny":
+            await self.evidence.event(
+                "policy_evaluated",
+                {
+                    "phase": phase,
+                    "step_id": step_id,
+                    "url": url,
+                    **decision.model_dump(mode="json"),
+                },
+            )
+        if decision.disposition != "deny":
+            return None
+        return await self._failure(
+            StepDiagnostic(
+                step_id=step_id,
+                code=FailureCode.POLICY_DENIED,
+                message=decision.reason,
+                observed=url,
+            ),
+            completed,
+            inputs,
+            votes,
+        )
 
     async def _escalate_or_fail(
         self,

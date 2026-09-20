@@ -215,7 +215,7 @@ The artifact has four sections:
 - `execution`: ordered steps, value sources, target bundles, checkpoints, recoveries, fatal states, and success conditions.
 - `governance`: approval state and discovery/compiler provenance.
 
-Pydantic uses `extra="forbid"` and cross-field validation. Duplicate step IDs, unknown input/output references, and success conditions referring to absent checkpoints are rejected while loading the artifact.
+Pydantic uses `extra="forbid"` and cross-field validation. Loading rejects duplicate step IDs, unknown input/output references, impossible action shapes, success conditions referring to absent checkpoints, and required outputs that no step can produce.
 
 ### Targeting and deterministic replay
 
@@ -227,13 +227,13 @@ Before an action, discovery harvests up to three independent target descriptions
 
 Replay resolves every viable strategy and stamps the resulting elements with opaque identities. All resolved candidates must identify the same element. If no strategy resolves, replay returns `LOCATOR_UNRESOLVED`; disagreement is `LOCATOR_CONFLICT`; one remaining strategy is allowed but recorded as a weak vote. This is intentionally conservative: replay does not click a plurality winner or ask an LLM to guess.
 
-After each action, replay checks declared outcomes, fatal states, the expected checkpoint, and then any applicable bounded recovery until the checkpoint deadline. It finally verifies required outputs and the postcondition. The session-storage ledger is only a test oracle and never establishes replay success.
+Before navigation, replay rejects missing, unexpected, or incorrectly typed inputs. After each action it rechecks the observed destination against the location allowlist, then checks declared outcomes, fatal states, the expected checkpoint, and any applicable bounded recovery until the checkpoint deadline. Before returning success it verifies output presence and types plus the final postcondition. The session-storage ledger is only a test oracle and never establishes replay success.
 
 ### Safety and evidence
 
 `policy.yaml` allowlists origins, paths, actions, and risk dispositions. The same policy runs during discovery and replay. Model-declared risk is advisory; trusted risk is inferred from the chosen control. Safe actions are allowed, mutating actions require `--allow-mutating`, and irreversible actions are denied.
 
-Known sensitive runtime values and common identifier/financial patterns are redacted before model egress and before evidence is written. Screenshot capture temporarily masks known runtime values in every accessible frame and then restores the page. Locator identity fields are preserved because redacting them would make the capability unusable.
+Known sensitive runtime values and common identifier/financial patterns are redacted before model egress and before evidence is written. Intervention diagnostics, captured human-event metadata, and operator notes pass through the same redaction boundary before persistence. Screenshot capture temporarily masks known runtime values in every accessible frame and then restores the page. Locator identity fields are preserved because redacting them would make the capability unusable.
 
 Each run directory contains a manifest, a redacted JSONL trace, and a structured result. Discovery additionally writes `recording.jsonl` and `discovery-result.json`; failures include a screenshot; handoff includes `intervention.json`, an intervention screenshot, and `handoff.json`.
 
@@ -276,7 +276,7 @@ python -m pytest
 python scripts/validate_repository.py
 ```
 
-The suite currently collects 37 tests. Important coverage includes frame-aware readiness, real-browser discovery/compile/replay, outcome and recovery paths, mutating policy, locator conflict, stale observation refs, compiler invariants, tenant overlays, draft approval, redaction, lease expiry, capture failure during hand-back, and same-session checkpoint resume. The repository validator separately checks committed capability schemas, provenance paths, evidence JSON/JSONL, run-directory identities, job definitions, and catalog freshness.
+The suite currently collects 46 tests. Important coverage includes frame-aware readiness, real-browser discovery/compile/replay, invocation and output typing, artifact action/output invariants, post-action redirect policy, outcome and recovery paths, mutating policy, locator conflict, stale observation refs, compiler invariants, tenant overlays, draft approval, handoff-file redaction, lease expiry, capture failure during hand-back, and same-session checkpoint resume. The repository validator separately checks committed capability schemas, provenance paths, evidence JSON/JSONL, run-directory identities, job definitions, and catalog freshness.
 
 GitHub Actions runs the validator and the complete suite with Playwright Chromium on Python 3.12. Docker is intentionally not required: tests start the local FastAPI target in-process, while the automation controls a runner-local browser. Containerizing either side would add networking and browser-handoff complexity without strengthening the boundary under test.
 

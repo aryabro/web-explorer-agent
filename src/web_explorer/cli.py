@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
-from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 import uvicorn
@@ -19,7 +19,7 @@ from web_explorer.catalog import (
 )
 from web_explorer.compiler import Job, compile_recording, save_capability
 from web_explorer.config import LLMConfig, runtime_pin
-from web_explorer.contracts import Approval, Risk
+from web_explorer.contracts import Approval, Parameter, Risk
 from web_explorer.discovery import DiscoveryLoop, OpenAICompatibleModel
 from web_explorer.evidence import EvidenceWriter
 from web_explorer.handoff import HandoffCoordinator
@@ -42,19 +42,48 @@ def _parse_inputs(values: list[str]) -> dict[str, str]:
     return result
 
 
-def _runtime_inputs(values: list[str], declared: Iterable[str]) -> dict[str, str]:
+def _coerce_cli_value(name: str, raw: str, parameter: Parameter) -> Any:
+    if parameter.type == "string":
+        return raw
+    if parameter.type == "boolean":
+        normalized = raw.lower()
+        if normalized == "true":
+            return True
+        if normalized == "false":
+            return False
+        raise typer.BadParameter(f"input {name!r} must be true or false")
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise typer.BadParameter(f"input {name!r} must be a number") from exc
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise typer.BadParameter(f"input {name!r} must be a number")
+    if isinstance(value, float) and not math.isfinite(value):
+        raise typer.BadParameter(f"input {name!r} must be a finite number")
+    return value
+
+
+def _runtime_inputs(
+    values: list[str], declared: dict[str, Parameter]
+) -> dict[str, Any]:
     supplied = _parse_inputs(values)
     names = set(declared)
+    unexpected = sorted(set(supplied) - names)
+    if unexpected:
+        raise typer.BadParameter(f"unexpected inputs: {', '.join(unexpected)}")
     if "operator_id" in names:
         supplied.setdefault("operator_id", "teller7")
     if "pin" in names:
         supplied.setdefault("pin", runtime_pin())
-    return supplied
+    return {
+        name: _coerce_cli_value(name, value, declared[name])
+        for name, value in supplied.items()
+    }
 
 
-def _known_sensitive(definitions: dict, values: dict[str, str]) -> list[str]:
+def _known_sensitive(definitions: dict, values: dict[str, Any]) -> list[str]:
     return [
-        values[name]
+        str(values[name])
         for name, definition in definitions.items()
         if name in values and definition.sensitivity != "none"
     ]
@@ -104,7 +133,9 @@ async def _discover(
         redactor=redactor,
     )
     surface = await launch_browser(headless=headless)
-    coordinator = HandoffCoordinator(surface, event_sink=evidence.event)
+    coordinator = HandoffCoordinator(
+        surface, event_sink=evidence.event, redactor=evidence.redactor
+    )
 
     async def on_intervention(intervention) -> bool:
         if headless:
@@ -273,7 +304,9 @@ async def _replay(
     )
     surface = await launch_browser(headless=headless)
     coordinator = (
-        HandoffCoordinator(surface, event_sink=evidence.event)
+        HandoffCoordinator(
+            surface, event_sink=evidence.event, redactor=evidence.redactor
+        )
         if handoff_enabled
         else None
     )

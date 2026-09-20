@@ -69,6 +69,7 @@ def tool_definitions(directory: str | Path = "capabilities") -> list[dict[str, A
                         "type": "object",
                         "properties": properties,
                         "required": required,
+                        "additionalProperties": False,
                     },
                 },
             }

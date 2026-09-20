@@ -4,13 +4,18 @@ from pathlib import Path
 
 import pytest
 
-from web_explorer.contracts import BoundingBox, Risk
+from web_explorer.contracts import BoundingBox, Parameter, Risk
 from web_explorer.discovery import Decision, DiscoveryLoop
 from web_explorer.evidence import EvidenceWriter
 from web_explorer.handoff import SessionLease
 from web_explorer.policy import PolicyEngine
 from web_explorer.redact import Redactor
-from web_explorer.replay import ExecutionState, ReplayEngine, load_capability
+from web_explorer.replay import (
+    ExecutionState,
+    ReplayEngine,
+    load_capability,
+    validate_invocation_inputs,
+)
 from web_explorer.surface.base import ControlObservation, Observation
 from web_explorer.tenants import apply_tenant, compatibility_fingerprint, find_profile
 
@@ -140,6 +145,35 @@ def test_trusted_risk_is_never_downgraded_by_the_model(policy: PolicyEngine) -> 
     assert policy.infer_risk(action="click", control=sign_on) == Risk.SAFE
 
 
+def test_invocation_inputs_enforce_names_and_types() -> None:
+    definitions = {
+        "label": Parameter(type="string", description="label"),
+        "count": Parameter(type="number", description="count"),
+        "enabled": Parameter(type="boolean", description="enabled"),
+    }
+    assert (
+        validate_invocation_inputs(
+            definitions, {"label": "items", "count": 2, "enabled": True}
+        )
+        is None
+    )
+
+    wrong_type = validate_invocation_inputs(
+        definitions, {"label": "items", "count": True, "enabled": True}
+    )
+    assert wrong_type is not None
+    assert wrong_type.code == "INPUT_INVALID"
+    assert wrong_type.expected == "number"
+    assert wrong_type.observed == "boolean"
+
+    unexpected = validate_invocation_inputs(
+        definitions,
+        {"label": "items", "count": 2, "enabled": True, "extra": "no"},
+    )
+    assert unexpected is not None
+    assert "unexpected inputs: extra" in unexpected.message
+
+
 @pytest.mark.asyncio
 async def test_discovery_does_not_navigate_before_policy_allow(
     policy: PolicyEngine,
@@ -250,6 +284,103 @@ async def test_replay_entry_navigation_is_policy_gated(
     assert result.status == "failure"
     assert result.error.code == "POLICY_DENIED"
     assert surface.actions == []
+
+
+@pytest.mark.asyncio
+async def test_replay_rejects_invalid_input_before_navigation(
+    policy: PolicyEngine, tmp_path: Path
+) -> None:
+    capability = load_capability("capabilities/member.read_savings_balance.json")
+    surface = RecordingSurface()
+    evidence = EvidenceWriter(
+        kind="test-input-contract",
+        goal=capability.contract.description,
+        target=capability.compatibility.surface.entry_point,
+        model=None,
+        redactor=Redactor([]),
+        root=tmp_path,
+    )
+    result = await ReplayEngine(
+        surface=surface, policy=policy, evidence=evidence, allow_draft=True
+    ).run(
+        capability,
+        {"operator_id": "teller7", "pin": "1937", "member_id": {"bad": "value"}},
+    )
+    assert result.status == "failure"
+    assert result.error.code == "INPUT_INVALID"
+    assert result.error.expected == "string"
+    assert result.error.observed == "object"
+    assert surface.actions == []
+
+
+@pytest.mark.asyncio
+async def test_replay_denies_unexpected_post_action_redirect(
+    policy: PolicyEngine, tmp_path: Path
+) -> None:
+    class RedirectingSurface(RecordingSurface):
+        async def act_target(self, action, target, value=None):
+            self.actions.append((action, target, value))
+            self.observation = self.observation.model_copy(
+                update={"url": "https://not-allowed.example/escaped"}
+            )
+            return None
+
+    capability = load_capability("capabilities/member.read_savings_balance.json")
+    surface = RedirectingSurface()
+    evidence = EvidenceWriter(
+        kind="test-post-action-policy",
+        goal=capability.contract.description,
+        target=capability.compatibility.surface.entry_point,
+        model=None,
+        redactor=Redactor([]),
+        root=tmp_path,
+    )
+    result = await ReplayEngine(
+        surface=surface, policy=policy, evidence=evidence, allow_draft=True
+    ).run(
+        capability,
+        {"operator_id": "teller7", "pin": "1937", "member_id": "12345"},
+    )
+    assert result.status == "failure"
+    assert result.error.code == "POLICY_DENIED"
+    assert result.error.step_id == "s1"
+    assert result.error.observed == "https://not-allowed.example/escaped"
+    assert result.completed_steps == []
+
+
+@pytest.mark.asyncio
+async def test_replay_validates_output_types_before_success(
+    policy: PolicyEngine, tmp_path: Path
+) -> None:
+    class TypedOutputSurface(RecordingSurface):
+        async def act_target(self, action, target, value=None):
+            self.actions.append((action, target, value))
+            return "not-a-number" if action == "extract" else None
+
+        async def checkpoint_visible(self, checkpoint) -> bool:
+            return checkpoint.id.startswith("cp")
+
+    capability = load_capability("capabilities/member.read_savings_balance.json")
+    capability.contract.outputs["savings_balance"].type = "number"
+    surface = TypedOutputSurface()
+    evidence = EvidenceWriter(
+        kind="test-output-contract",
+        goal=capability.contract.description,
+        target=capability.compatibility.surface.entry_point,
+        model=None,
+        redactor=Redactor([]),
+        root=tmp_path,
+    )
+    result = await ReplayEngine(
+        surface=surface, policy=policy, evidence=evidence, allow_draft=True
+    ).run(
+        capability,
+        {"operator_id": "teller7", "pin": "1937", "member_id": "12345"},
+    )
+    assert result.status == "failure"
+    assert result.error.code == "OUTPUT_INVALID"
+    assert result.error.expected == "number"
+    assert result.error.observed == "string"
 
 
 @pytest.mark.asyncio

@@ -13,6 +13,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
+from web_explorer.redact import Redactor
 from web_explorer.surface.base import SurfaceDriver
 
 
@@ -94,13 +95,16 @@ class HandoffCoordinator:
         surface: SurfaceDriver,
         lease: SessionLease | None = None,
         event_sink: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None,
+        redactor: Redactor | None = None,
     ) -> None:
         self.surface = surface
         self.lease = lease or SessionLease()
         self.event = event_sink or _noop_event
+        self.redactor = redactor or Redactor()
         self.interventions: dict[str, Intervention] = {}
         self._returned: dict[str, asyncio.Event] = {}
         self._directories: dict[str, Path] = {}
+        self._redactors: dict[str, Redactor] = {}
 
     async def raise_intervention(
         self,
@@ -128,9 +132,14 @@ class HandoffCoordinator:
         self.interventions[intervention.id] = intervention
         self._returned[intervention.id] = asyncio.Event()
         self._directories[intervention.id] = evidence_directory
+        self._redactors[intervention.id] = Redactor(
+            [*self.redactor.known_values, *(redact_values or [])]
+        )
         evidence_directory.mkdir(parents=True, exist_ok=True)
-        (evidence_directory / "intervention.json").write_text(
-            intervention.model_dump_json(indent=2), encoding="utf-8"
+        self._write_json(
+            evidence_directory / "intervention.json",
+            intervention.model_dump(mode="json", exclude_none=True),
+            intervention.id,
         )
         await self.surface.screenshot(
             str(evidence_directory / "screenshots" / "intervention.png"),
@@ -192,23 +201,21 @@ class HandoffCoordinator:
         self._persist(intervention)
         lease_state = await self.lease.state()
         directory = self._directories[intervention_id]
-        (directory / "handoff.json").write_text(
-            json.dumps(
-                {
-                    "holder": lease_state.holder,
-                    "operator_id": operator_id,
-                    "capability_id": intervention.capability_id,
-                    "goal": intervention.goal,
-                    "reason": intervention.diagnostic,
-                    "human_events": events,
-                    "human_capture_error": capture_error,
-                    "intervention_id": intervention_id,
-                    "returned_at": datetime.now(UTC).isoformat(),
-                    "note": note,
-                },
-                indent=2,
-            ),
-            encoding="utf-8",
+        self._write_json(
+            directory / "handoff.json",
+            {
+                "holder": lease_state.holder,
+                "operator_id": operator_id,
+                "capability_id": intervention.capability_id,
+                "goal": intervention.goal,
+                "reason": intervention.diagnostic,
+                "human_events": events,
+                "human_capture_error": capture_error,
+                "intervention_id": intervention_id,
+                "returned_at": datetime.now(UTC).isoformat(),
+                "note": note,
+            },
+            intervention_id,
         )
         await self.surface.resume()
         await self.event(
@@ -236,8 +243,17 @@ class HandoffCoordinator:
             raise KeyError("unknown intervention") from exc
 
     def _persist(self, intervention: Intervention) -> None:
-        (self._directories[intervention.id] / "intervention.json").write_text(
-            intervention.model_dump_json(indent=2), encoding="utf-8"
+        self._write_json(
+            self._directories[intervention.id] / "intervention.json",
+            intervention.model_dump(mode="json", exclude_none=True),
+            intervention.id,
+        )
+
+    def _write_json(self, path: Path, value: Any, intervention_id: str) -> None:
+        redactor = self._redactors.get(intervention_id, self.redactor)
+        path.write_text(
+            json.dumps(redactor.data(value), indent=2, ensure_ascii=False),
+            encoding="utf-8",
         )
 
     def operator_app(self) -> FastAPI:

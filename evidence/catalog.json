@@ -45,7 +45,8 @@
           },
           "required": [
             "member_id"
-          ]
+          ],
+          "additionalProperties": false
         }
       }
     }

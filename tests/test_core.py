@@ -483,6 +483,12 @@ def test_catalog_lists_and_emits_tool_defs() -> None:
     tools = tool_definitions()
     names = {item["function"]["name"] for item in tools}
     assert "member_read_savings_balance" in names
+    parameters = next(
+        item["function"]["parameters"]
+        for item in tools
+        if item["function"]["name"] == "member_read_savings_balance"
+    )
+    assert parameters["additionalProperties"] is False
 
 
 @pytest.mark.asyncio
